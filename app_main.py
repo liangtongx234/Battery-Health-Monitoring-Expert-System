@@ -72,7 +72,7 @@ COLORS = {
 LANG = {
     "en": {
         "title": "Battery Health Monitoring System",
-        "subtitle": "CCT-Net (CBAM-CNN-Transformer) with SHAP Interpretability",
+        "subtitle": "CCT-Net(CBAM-CNN-Transformer) with SHAP Interpretability",
         "nav_demo": "Demo",
         "nav_train": "Train",
         "nav_predict": "Predict",
@@ -1925,7 +1925,7 @@ def page_about(lang):
     st.markdown("""
     <div class="card">
         <h4 style="margin: 0 0 0.8rem 0; color: #2C3E50; font-size: 1.1rem;">
-            SHAP Interpretability
+             SHAP Interpretability
         </h4>
         <p style="margin: 0; color: #5D6D7E; font-size: 0.95rem; line-height: 1.5;">
             SHAP (SHapley Additive exPlanations) values provide transparent and interpretable 
@@ -1939,7 +1939,7 @@ def page_about(lang):
     st.markdown("""
     <div class="card">
         <h4 style="margin: 0 0 0.8rem 0; color: #2C3E50; font-size: 1.1rem;">
-            Key Features
+             Key Features
         </h4>
         <ul style="margin: 0; color: #5D6D7E; font-size: 0.95rem; line-height: 1.8; padding-left: 1.2rem;">
             <li>Real-time SOH prediction with high accuracy</li>
@@ -1956,7 +1956,7 @@ def page_about(lang):
     st.markdown("""
     <div class="card">
         <h4 style="margin: 0 0 0.8rem 0; color: #2C3E50; font-size: 1.1rem;">
-            Repository Structure
+             Repository Structure
         </h4>
         <pre style="background: #F5F7F9; padding: 1rem; border-radius: 6px; font-size: 0.85rem; color: #2C3E50; overflow-x: auto;">
 ├── app.py              # Main Streamlit application
@@ -1992,20 +1992,60 @@ def main():
         st.session_state.demo_cycle = 0
     if 'screenshot_mode' not in st.session_state:
         st.session_state.screenshot_mode = False
+    if 'a4_mode' not in st.session_state:
+        st.session_state.a4_mode = False
 
     lang = st.session_state.lang
     page = st.session_state.page
     screenshot_mode = st.session_state.screenshot_mode
+    a4_mode = st.session_state.a4_mode
 
     # Apply screenshot mode class to body
     if screenshot_mode:
         st.markdown('<style>.main { padding-top: 0 !important; } .block-container { padding-top: 1rem !important; }</style>', unsafe_allow_html=True)
 
+    # Apply A4 mode - constrain width to A4 paper proportions
+    if a4_mode:
+        st.markdown("""
+        <style>
+        /* A4 Mode - 210mm width at 96dpi ≈ 794px, using 850px for better readability */
+        .main .block-container {
+            max-width: 850px !important;
+            padding: 2rem 2rem !important;
+            margin: 0 auto !important;
+            background: white !important;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1) !important;
+            min-height: 100vh;
+        }
+        .stApp {
+            background: #E8E8E8 !important;
+        }
+        .nav-bar {
+            max-width: 850px !important;
+            margin: 0 auto 1.5rem auto !important;
+            border-radius: 12px !important;
+        }
+        /* Adjust chart sizes for A4 */
+        .stPlotlyChart, .stPyplot {
+            max-width: 100% !important;
+        }
+        /* Hide scrollbars for cleaner screenshot */
+        ::-webkit-scrollbar {
+            display: none;
+        }
+        /* Print-friendly colors */
+        @media print {
+            .stApp { background: white !important; }
+            .block-container { box-shadow: none !important; }
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
     render_nav(lang)
 
     # Navigation buttons (hidden in screenshot mode)
-    if not screenshot_mode:
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
+    if not screenshot_mode and not a4_mode:
+        col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
 
         with col1:
             if st.button(T('nav_demo', lang), key='btn_demo', use_container_width=True):
@@ -2034,13 +2074,36 @@ def main():
                 st.rerun()
 
         with col6:
-            screenshot_label = "Screenshot Mode"
-            if st.button(screenshot_label, key='btn_screenshot', use_container_width=True):
+            if st.button(" Screenshot", key='btn_screenshot', use_container_width=True):
                 st.session_state.screenshot_mode = True
+                st.rerun()
+
+        with col7:
+            if st.button(" A4 Mode", key='btn_a4', use_container_width=True):
+                st.session_state.a4_mode = True
                 st.rerun()
 
         st.markdown(f"<hr style='margin: 1rem 0; border: none; border-top: 1px solid {COLORS['border']};'>",
                     unsafe_allow_html=True)
+    elif a4_mode:
+        # Show A4 mode controls
+        col1, col2, col3 = st.columns([1, 1, 1])
+        with col1:
+            if st.button(" Exit A4 Mode", key='btn_exit_a4', use_container_width=True):
+                st.session_state.a4_mode = False
+                st.rerun()
+        with col2:
+            st.markdown("""
+            <div style="text-align: center; padding: 0.5rem; background: #E3F2FD; border-radius: 8px; font-size: 0.85rem;">
+                 A4 Mode (850px width) - Use browser print (Ctrl+P) or screenshot tool
+            </div>
+            """, unsafe_allow_html=True)
+        with col3:
+            lang_label = "English" if lang == 'zh' else "中文"
+            if st.button(lang_label, key='btn_lang_a4', use_container_width=True):
+                st.session_state.lang = 'en' if lang == 'zh' else 'zh'
+                st.rerun()
+        st.markdown("<br>", unsafe_allow_html=True)
     else:
         # Show exit button in screenshot mode
         if st.button("✕ Exit Screenshot Mode", key='btn_exit_screenshot'):
