@@ -72,7 +72,7 @@ COLORS = {
 LANG = {
     "en": {
         "title": "Battery Health Monitoring System",
-        "subtitle": "CCT-Net(CBAM-CNN-Transformer) with SHAP Interpretability",
+        "subtitle": "CCT-Net (CBAM-CNN-Transformer) with SHAP Interpretability",
         "nav_demo": "Demo",
         "nav_train": "Train",
         "nav_predict": "Predict",
@@ -215,7 +215,7 @@ def load_css():
     .screenshot-mode [data-testid="stSidebar"] { display: none !important; }
     .screenshot-mode .nav-bar { margin: 0 0 1.5rem 0; border-radius: 12px; }
     .screenshot-mode hr { display: none !important; }
-    
+
     @media print {
         .stButton { display: none !important; }
         .nav-bar { break-inside: avoid; }
@@ -526,7 +526,7 @@ def set_seed(seed: int = 42):
 
 
 def seed_worker(worker_id: int):
-    worker_seed = torch.initial_seed() % 2**32
+    worker_seed = torch.initial_seed() % 2 ** 32
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
@@ -594,11 +594,14 @@ def read_csv(file_or_path):
 
 class IdentityScaler:
     """Dummy scaler that returns input unchanged."""
-    def fit(self, X): 
+
+    def fit(self, X):
         return self
-    def transform(self, X): 
+
+    def transform(self, X):
         return X
-    def inverse_transform(self, X): 
+
+    def inverse_transform(self, X):
         return X
 
 
@@ -612,15 +615,15 @@ def _infer_input_dim_from_state_dict(sd: dict):
     """
     possible_keys = [
         "cnn_block1.0.weight",  # New naming
-        "cnn1.0.weight",        # Legacy naming  
+        "cnn1.0.weight",  # Legacy naming
     ]
-    
+
     for k in possible_keys:
         if k in sd:
             weight = sd[k]
             if hasattr(weight, "shape") and len(weight.shape) == 3:
                 return int(weight.shape[1])
-    
+
     return None
 
 
@@ -645,7 +648,7 @@ def _remap_legacy_state_dict(sd: dict) -> dict:
             ("cbam2.ca.", "cbam2.channel_attention."),
             ("cbam2.sa.", "cbam2.spatial_attention."),
         ]
-        
+
         for old_prefix, new_prefix in prefix_mappings:
             if nk.startswith(old_prefix):
                 nk = nk.replace(old_prefix, new_prefix, 1)
@@ -658,28 +661,28 @@ def _remap_legacy_state_dict(sd: dict) -> dict:
 def load_model_file(path_or_file, device):
     """
     Load model with full backward compatibility for legacy checkpoints.
-    
+
     FIXED: Now properly handles models without 'input_dim' key by inferring
     from model weights or feature_names.
     """
     ckpt = torch.load(path_or_file, map_location=device, weights_only=False)
-    
+
     # Handle different checkpoint formats
     if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
         sd_raw = ckpt["model_state_dict"]
     else:
         sd_raw = ckpt
         ckpt = {"model_state_dict": sd_raw}
-    
+
     # Remap legacy key names
     sd = _remap_legacy_state_dict(sd_raw)
-    
+
     # ========================================
     # CRITICAL FIX: Infer input_dim robustly
     # Never use ckpt['input_dim'] directly!
     # ========================================
     input_dim = None
-    
+
     # Method 1: Get from checkpoint (using .get() to avoid KeyError)
     stored_dim = ckpt.get("input_dim")
     if stored_dim is not None:
@@ -687,31 +690,31 @@ def load_model_file(path_or_file, device):
             input_dim = int(stored_dim)
         except (ValueError, TypeError):
             pass
-    
+
     # Method 2: Infer from feature_names
     if input_dim is None:
         fn = ckpt.get("feature_names")
         if isinstance(fn, (list, tuple)) and len(fn) > 0:
             input_dim = len(fn)
-    
+
     # Method 3: Infer from Conv1d weights (most reliable for legacy)
     if input_dim is None:
         input_dim = _infer_input_dim_from_state_dict(sd)
-    
+
     if input_dim is None:
         raise ValueError(
             "Cannot determine input_dim from checkpoint. "
             "Model file may be corrupted or unsupported format."
         )
-    
+
     input_dim = int(input_dim)
-    
+
     # Get config with defaults
     cfg = ckpt.get("config") or {}
     num_heads = int(cfg.get("num_heads", 8))
     num_layers = int(cfg.get("num_layers", 4))
     dropout = float(cfg.get("dropout", 0.3))
-    
+
     # Build model
     model = CBAMCNNTransformer(
         input_dim=input_dim,
@@ -720,39 +723,37 @@ def load_model_file(path_or_file, device):
         num_layers=num_layers,
         dropout=dropout
     ).to(device)
-    
+
     # Load weights (strict=False for partial matches)
     missing, unexpected = model.load_state_dict(sd, strict=False)
-    
+
     # Populate checkpoint with required fields
     ckpt["input_dim"] = input_dim
     ckpt["config"] = cfg
-    
+
     if "seq_length" not in ckpt:
         ckpt["seq_length"] = 12
-    
+
     if "rated_capacity" not in ckpt:
         ckpt["rated_capacity"] = 2.0
-    
+
     if ckpt.get("scaler_X") is None:
         ckpt["scaler_X"] = IdentityScaler()
-    
+
     if ckpt.get("scaler_y") is None:
         ckpt["scaler_y"] = IdentityScaler()
-    
+
     if not isinstance(ckpt.get("feature_names"), (list, tuple)):
         ckpt["feature_names"] = [f"f{i}" for i in range(input_dim)]
-    
+
     # Optional warning
     if missing or unexpected:
         st.warning(
             f"Model loaded (strict=False): {len(missing)} missing, {len(unexpected)} unexpected keys. "
             "This is normal for legacy models."
         )
-    
+
     return model, ckpt
-
-
 
 
 # ============================================================================
@@ -1094,8 +1095,6 @@ def categorize_mechanisms(names, importance):
     return result_names, contrib
 
 
-
-
 # ============================================================================
 # Training & Prediction Functions
 # ============================================================================
@@ -1434,8 +1433,6 @@ def render_results(results, selected_cycle, lang):
     )
 
 
-
-
 # ============================================================================
 # Page: Demo
 # ============================================================================
@@ -1488,7 +1485,8 @@ def page_demo(lang):
                         cand = [c for c in df.columns
                                 if c not in exclude and pd.api.types.is_numeric_dtype(df[c])]
 
-                        use_ckpt_cols = isinstance(feature_names, (list, tuple)) and all((c in df.columns) for c in feature_names)
+                        use_ckpt_cols = isinstance(feature_names, (list, tuple)) and all(
+                            (c in df.columns) for c in feature_names)
 
                         if not use_ckpt_cols:
                             if input_dim <= 0:
@@ -1499,7 +1497,8 @@ def page_demo(lang):
                                 raise RuntimeError("demo not enough cols")
                             feature_names = cand[:input_dim]
                             ckpt["feature_names"] = feature_names
-                            st.warning(f"Demo: Legacy model without feature_names, auto-selected {len(feature_names)} columns.")
+                            st.warning(
+                                f"Demo: Legacy model without feature_names, auto-selected {len(feature_names)} columns.")
 
                         test_features = df[feature_names].copy()
                         test_labels = df['SOH']
@@ -1842,7 +1841,8 @@ def page_predict(lang):
                     cand = [c for c in test_df.columns
                             if c not in exclude and pd.api.types.is_numeric_dtype(test_df[c])]
 
-                    use_ckpt_cols = isinstance(feature_names, (list, tuple)) and all((c in test_df.columns) for c in feature_names)
+                    use_ckpt_cols = isinstance(feature_names, (list, tuple)) and all(
+                        (c in test_df.columns) for c in feature_names)
 
                     if not use_ckpt_cols:
                         if input_dim <= 0:
@@ -1905,7 +1905,7 @@ def page_about(lang):
         </p>
     </div>
     """, unsafe_allow_html=True)
-    
+
     # Model Architecture Card
     st.markdown("""
     <div class="card">
@@ -1920,12 +1920,12 @@ def page_about(lang):
         </p>
     </div>
     """, unsafe_allow_html=True)
-    
+
     # SHAP Card
     st.markdown("""
     <div class="card">
         <h4 style="margin: 0 0 0.8rem 0; color: #2C3E50; font-size: 1.1rem;">
-             SHAP Interpretability
+            SHAP Interpretability
         </h4>
         <p style="margin: 0; color: #5D6D7E; font-size: 0.95rem; line-height: 1.5;">
             SHAP (SHapley Additive exPlanations) values provide transparent and interpretable 
@@ -1934,12 +1934,12 @@ def page_about(lang):
         </p>
     </div>
     """, unsafe_allow_html=True)
-    
+
     # Features Card
     st.markdown("""
     <div class="card">
         <h4 style="margin: 0 0 0.8rem 0; color: #2C3E50; font-size: 1.1rem;">
-             Key Features
+            Key Features
         </h4>
         <ul style="margin: 0; color: #5D6D7E; font-size: 0.95rem; line-height: 1.8; padding-left: 1.2rem;">
             <li>Real-time SOH prediction with high accuracy</li>
@@ -1951,12 +1951,12 @@ def page_about(lang):
         </ul>
     </div>
     """, unsafe_allow_html=True)
-    
+
     # Repository Structure Card
     st.markdown("""
     <div class="card">
         <h4 style="margin: 0 0 0.8rem 0; color: #2C3E50; font-size: 1.1rem;">
-             Repository Structure
+            Repository Structure
         </h4>
         <pre style="background: #F5F7F9; padding: 1rem; border-radius: 6px; font-size: 0.85rem; color: #2C3E50; overflow-x: auto;">
 ├── app.py              # Main Streamlit application
@@ -1968,7 +1968,7 @@ def page_about(lang):
         </pre>
     </div>
     """, unsafe_allow_html=True)
-    
+
     # Version info
     st.markdown("""
     <div style="text-align: center; margin-top: 2rem; color: #7F8C9A; font-size: 0.85rem;">
@@ -1992,60 +1992,22 @@ def main():
         st.session_state.demo_cycle = 0
     if 'screenshot_mode' not in st.session_state:
         st.session_state.screenshot_mode = False
-    if 'a4_mode' not in st.session_state:
-        st.session_state.a4_mode = False
 
     lang = st.session_state.lang
     page = st.session_state.page
     screenshot_mode = st.session_state.screenshot_mode
-    a4_mode = st.session_state.a4_mode
 
     # Apply screenshot mode class to body
     if screenshot_mode:
-        st.markdown('<style>.main { padding-top: 0 !important; } .block-container { padding-top: 1rem !important; }</style>', unsafe_allow_html=True)
-
-    # Apply A4 mode - constrain width to A4 paper proportions
-    if a4_mode:
-        st.markdown("""
-        <style>
-        /* A4 Mode - 210mm width at 96dpi ≈ 794px, using 850px for better readability */
-        .main .block-container {
-            max-width: 850px !important;
-            padding: 2rem 2rem !important;
-            margin: 0 auto !important;
-            background: white !important;
-            box-shadow: 0 0 20px rgba(0,0,0,0.1) !important;
-            min-height: 100vh;
-        }
-        .stApp {
-            background: #E8E8E8 !important;
-        }
-        .nav-bar {
-            max-width: 850px !important;
-            margin: 0 auto 1.5rem auto !important;
-            border-radius: 12px !important;
-        }
-        /* Adjust chart sizes for A4 */
-        .stPlotlyChart, .stPyplot {
-            max-width: 100% !important;
-        }
-        /* Hide scrollbars for cleaner screenshot */
-        ::-webkit-scrollbar {
-            display: none;
-        }
-        /* Print-friendly colors */
-        @media print {
-            .stApp { background: white !important; }
-            .block-container { box-shadow: none !important; }
-        }
-        </style>
-        """, unsafe_allow_html=True)
+        st.markdown(
+            '<style>.main { padding-top: 0 !important; } .block-container { padding-top: 1rem !important; }</style>',
+            unsafe_allow_html=True)
 
     render_nav(lang)
 
     # Navigation buttons (hidden in screenshot mode)
-    if not screenshot_mode and not a4_mode:
-        col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
+    if not screenshot_mode:
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
 
         with col1:
             if st.button(T('nav_demo', lang), key='btn_demo', use_container_width=True):
@@ -2074,30 +2036,13 @@ def main():
                 st.rerun()
 
         with col6:
-            if st.button(" Screenshot", key='btn_screenshot', use_container_width=True):
+            screenshot_label = "Screenshot Mode"
+            if st.button(screenshot_label, key='btn_screenshot', use_container_width=True):
                 st.session_state.screenshot_mode = True
-                st.rerun()
-
-        with col7:
-            if st.button(" A4 Mode", key='btn_a4', use_container_width=True):
-                st.session_state.a4_mode = True
                 st.rerun()
 
         st.markdown(f"<hr style='margin: 1rem 0; border: none; border-top: 1px solid {COLORS['border']};'>",
                     unsafe_allow_html=True)
-    elif a4_mode:
-        # Show A4 mode controls
-        col1, col2, col3 = st.columns([1, 1, 1])
-        with col1:
-            if st.button(" Exit A4 Mode", key='btn_exit_a4', use_container_width=True):
-                st.session_state.a4_mode = False
-                st.rerun()
-        with col3:
-            lang_label = "English" if lang == 'zh' else "中文"
-            if st.button(lang_label, key='btn_lang_a4', use_container_width=True):
-                st.session_state.lang = 'en' if lang == 'zh' else 'zh'
-                st.rerun()
-        st.markdown("<br>", unsafe_allow_html=True)
     else:
         # Show exit button in screenshot mode
         if st.button("✕ Exit Screenshot Mode", key='btn_exit_screenshot'):
