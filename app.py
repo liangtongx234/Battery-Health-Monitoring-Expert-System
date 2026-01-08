@@ -1098,7 +1098,7 @@ def predict_with_model(model, test_features, test_labels, scaler_X, scaler_y, se
         pd.Series(y_scaled),
         seq_length=seq_length
     )
-    loader = DataLoader(dataset, batch_size=32, shuffle=False)
+    loader = DataLoader(dataset, batch_size=64, shuffle=False)
 
     model.eval()
     preds, acts = [], []
@@ -1112,7 +1112,7 @@ def predict_with_model(model, test_features, test_labels, scaler_X, scaler_y, se
     preds = scaler_y.inverse_transform(np.array(preds).reshape(-1, 1)).flatten()
     acts = scaler_y.inverse_transform(np.array(acts).reshape(-1, 1)).flatten()
 
-    return preds * 100, acts * 100, X_scaled, dataset
+    return preds , acts X_scaled, dataset
 
 
 def calculate_shap_values(model, dataset, scaler_X, scaler_y, device, n_samples=200):
@@ -1180,6 +1180,7 @@ def render_nav(lang):
 # Results Section
 # ============================================================================
 def render_results(results, selected_cycle, lang):
+
     preds = np.array(results['predictions'], dtype=float)   # 0~1
     acts = np.array(results['actuals'], dtype=float)        # 0~1
     importance = np.array(results['feature_importance'], dtype=float)
@@ -1200,8 +1201,8 @@ def render_results(results, selected_cycle, lang):
     col1, col2, col3, col4 = st.columns([1.5, 0.8, 0.8, 0.8])
 
     with col1:
-        current_soh_pct = preds[selected_cycle] * 100.0
-        actual_soh_pct = acts[selected_cycle] * 100.0
+        current_soh_pct = preds[selected_cycle]
+        actual_soh_pct = acts[selected_cycle]
         status_text, status_class = get_status(current_soh_pct, lang)
 
         st.markdown(f"""
@@ -1216,8 +1217,8 @@ def render_results(results, selected_cycle, lang):
         """, unsafe_allow_html=True)
 
 
-    preds_pct = preds * 100.0
-    acts_pct = acts * 100.0
+    preds_pct = preds
+    acts_pct = acts
 
     with col2:
         mae = mean_absolute_error(acts_pct, preds_pct)
