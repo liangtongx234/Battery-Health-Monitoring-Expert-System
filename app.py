@@ -584,38 +584,6 @@ def read_csv(file_or_path):
             except:
                 continue
     return None
-def remap_legacy_state_dict(state_dict: dict) -> dict:
-    mapping_prefix = [
-        ("cnn1.", "cnn_block1."),
-        ("cnn2.", "cnn_block2."),
-        ("pos_enc.", "positional_encoding."),
-        ("transformer.", "transformer_encoder."),
-        ("attn_pool.", "attention_pool."),
-        ("fc.", "fc_out."),
-        ("cbam1.ca.", "cbam1.channel_attention."),
-        ("cbam1.sa.", "cbam1.spatial_attention."),
-        ("cbam2.ca.", "cbam2.channel_attention."),
-        ("cbam2.sa.", "cbam2.spatial_attention."),
-    ]
-
-    new_sd = {}
-    for k, v in state_dict.items():
-        nk = k
-
-
-        if nk == "query":
-            nk = "pool_query"
-
-        # 常规前缀替换
-        for old, new in mapping_prefix:
-            if nk.startswith(old):
-                nk = new + nk[len(old):]
-                break
-
-        new_sd[nk] = v
-
-    return new_sd
-
 
 from sklearn.preprocessing import StandardScaler
 
@@ -624,21 +592,38 @@ class IdentityScaler:
     def transform(self, X): return X
     def inverse_transform(self, X): return X
 
-def _infer_input_dim_from_state_dict(sd: dict):
-    for k in ["cnn_block1.0.weight", "cnn1.0.weight"]:
+
+def _infer_input_dim_from_state_dict(sd: dict) -> int | None:
+    """
+    从第一层Conv1d权重推断 input_dim
+    Conv1d.weight shape: [out_channels, in_channels, kernel_size]
+    """
+    for k in ("cnn_block1.0.weight", "cnn1.0.weight"):
         if k in sd and hasattr(sd[k], "shape") and len(sd[k].shape) == 3:
             return int(sd[k].shape[1])
     return None
 
+
 def _remap_legacy_state_dict(sd: dict) -> dict:
+    """
+    兼容旧模型命名：
+    cnn1->cnn_block1, cnn2->cnn_block2,
+    pos_enc->positional_encoding,
+    transformer->transformer_encoder,
+    attn_pool->attention_pool,
+    fc->fc_out,
+    query->pool_query,
+    cbam?.ca/sa -> cbam?.channel_attention/spatial_attention
+    """
     out = {}
     for k, v in sd.items():
         nk = k
 
-
+        # 单独处理 query
         if nk == "query":
             nk = "pool_query"
 
+        # 前缀映射
         if nk.startswith("cnn1."):
             nk = nk.replace("cnn1.", "cnn_block1.", 1)
         if nk.startswith("cnn2."):
@@ -656,7 +641,6 @@ def _remap_legacy_state_dict(sd: dict) -> dict:
         if nk.startswith("fc."):
             nk = nk.replace("fc.", "fc_out.", 1)
 
-
         if nk.startswith("cbam1.ca."):
             nk = nk.replace("cbam1.ca.", "cbam1.channel_attention.", 1)
         if nk.startswith("cbam1.sa."):
@@ -670,37 +654,51 @@ def _remap_legacy_state_dict(sd: dict) -> dict:
         out[nk] = v
     return out
 
-def load_model_file(path, device):
 
-    ckpt = torch.load(path, map_location=device, weights_only=False)
+def load_model_file(path_or_file, device):
+    """
+    ✅ 兼容三种保存格式：
+    1) 新格式：{'model_state_dict', 'input_dim', 'feature_names', 'scaler_X', 'scaler_y', 'seq_length', 'config', ...}
+    2) 旧格式（代码1）：{'model_state_dict', 'train_losses', ...} 没 input_dim/feature_names/scaler
+    3) 纯 state_dict：直接 torch.save(model.state_dict())
+    """
+    ckpt = torch.load(path_or_file, map_location=device, weights_only=False)
 
-    # 取出state_dict
-    if "model_state_dict" in ckpt:
+    # ---- 取 state_dict ----
+    if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
         sd_raw = ckpt["model_state_dict"]
     else:
-
+        # 纯state_dict
         sd_raw = ckpt
+        ckpt = {"model_state_dict": sd_raw}
 
+    # ---- remap legacy keys ----
     sd = _remap_legacy_state_dict(sd_raw)
 
-
+    # ---- input_dim 推断/补齐：绝不使用 ckpt['input_dim'] ----
     input_dim = ckpt.get("input_dim", None)
+
     if input_dim is None:
-
-        if "feature_names" in ckpt and isinstance(ckpt["feature_names"], (list, tuple)):
-            input_dim = len(ckpt["feature_names"])
+        # 如果有 feature_names，用它长度
+        fn = ckpt.get("feature_names", None)
+        if isinstance(fn, (list, tuple)) and len(fn) > 0:
+            input_dim = len(fn)
         else:
-
+            # 从 conv1d 权重推断
             input_dim = _infer_input_dim_from_state_dict(sd)
 
     if input_dim is None:
-        raise KeyError("input_dim")
+        raise KeyError("input_dim (cannot infer from checkpoint/state_dict)")
 
-    cfg = ckpt.get("config", {})
+    input_dim = int(input_dim)
+
+    # ---- config 默认值 ----
+    cfg = ckpt.get("config", {}) if isinstance(ckpt.get("config", {}), dict) else {}
     num_heads = int(cfg.get("num_heads", 8))
     num_layers = int(cfg.get("num_layers", 4))
     dropout = float(cfg.get("dropout", 0.3))
 
+    # ---- 构建模型 ----
     model = CBAMCNNTransformer(
         input_dim=input_dim,
         embed_dim=128,
@@ -709,8 +707,10 @@ def load_model_file(path, device):
         dropout=dropout
     ).to(device)
 
+    # ---- 加载权重：strict=False 保命（旧模型字段不全）----
     missing, unexpected = model.load_state_dict(sd, strict=False)
 
+    # ---- ckpt 里补齐必须字段（防止后面 predict 访问炸）----
     ckpt["input_dim"] = input_dim
     ckpt["config"] = cfg
 
@@ -719,31 +719,28 @@ def load_model_file(path, device):
     if "rated_capacity" not in ckpt:
         ckpt["rated_capacity"] = 2.0
 
-
     if "scaler_X" not in ckpt:
         ckpt["scaler_X"] = IdentityScaler()
     if "scaler_y" not in ckpt:
         ckpt["scaler_y"] = IdentityScaler()
 
-
     if "feature_names" not in ckpt or not isinstance(ckpt.get("feature_names"), (list, tuple)):
         ckpt["feature_names"] = [f"f{i}" for i in range(input_dim)]
 
-
+    # ---- 友好提示（可选）----
     try:
         import streamlit as st
         if missing or unexpected:
             st.warning(
-                "模型权重已加载（兼容模式 strict=False）。\n"
-                f"Missing keys: {len(missing)} | Unexpected keys: {len(unexpected)}\n"
-                "如果预测数值不稳定，请用“新格式保存”重新训练/保存模型（带scaler/feature_names等）。"
+                "已兼容加载模型（strict=False）。\n"
+                f"Missing: {len(missing)} | Unexpected: {len(unexpected)}\n"
+                "旧模型未保存input_dim/feature_names/scaler时属于正常现象；"
+                "预测阶段将从CSV自动选取特征列。"
             )
     except:
         pass
 
     return model, ckpt
-
-
 
 
 # ============================================================================
