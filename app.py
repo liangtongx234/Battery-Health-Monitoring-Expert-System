@@ -1112,7 +1112,7 @@ def predict_with_model(model, test_features, test_labels, scaler_X, scaler_y, se
     preds = scaler_y.inverse_transform(np.array(preds).reshape(-1, 1)).flatten()
     acts = scaler_y.inverse_transform(np.array(acts).reshape(-1, 1)).flatten()
 
-    return preds , acts X_scaled, dataset
+    return preds * 100, acts * 100, X_scaled, dataset
 
 
 def calculate_shap_values(model, dataset, scaler_X, scaler_y, device, n_samples=200):
@@ -1300,10 +1300,10 @@ def render_results(results, selected_cycle, lang):
             <div class="mechanism-item">
                 <div style="display: flex; justify-content: space-between; font-size: 0.85rem;">
                     <span style="font-weight: 500;">{name}</span>
-                    <span style="color: {COLORS['primary']}; font-weight: 600;">{contrib * 100:.1f}%</span>
+                    <span style="color: {COLORS['primary']}; font-weight: 600;">{contrib:.1f}%</span>
                 </div>
                 <div class="mechanism-bar">
-                    <div class="mechanism-fill" style="width: {contrib * 100}%;"></div>
+                    <div class="mechanism-fill" style="width: {contrib}%;"></div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
