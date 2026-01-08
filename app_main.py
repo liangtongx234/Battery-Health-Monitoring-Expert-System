@@ -2092,12 +2092,6 @@ def main():
             if st.button(" Exit A4 Mode", key='btn_exit_a4', use_container_width=True):
                 st.session_state.a4_mode = False
                 st.rerun()
-        with col2:
-            st.markdown("""
-            <div style="text-align: center; padding: 0.5rem; background: #E3F2FD; border-radius: 8px; font-size: 0.85rem;">
-                 A4 Mode (850px width) - Use browser print (Ctrl+P) or screenshot tool
-            </div>
-            """, unsafe_allow_html=True)
         with col3:
             lang_label = "English" if lang == 'zh' else "中文"
             if st.button(lang_label, key='btn_lang_a4', use_container_width=True):
