@@ -3,6 +3,8 @@
 Battery Health Monitoring Expert System
 CBAM-CNN-Transformer with SHAP Interpretability
 GitHub Deployment Ready - Streamlit Cloud Compatible
+
+FIXED VERSION - Resolves KeyError: 'input_dim' for legacy model files
 """
 
 import streamlit as st
@@ -21,6 +23,8 @@ import os
 import warnings
 from datetime import datetime
 import glob
+import random
+import copy
 
 warnings.filterwarnings("ignore")
 
@@ -425,7 +429,6 @@ class CBAMCNNTransformer(nn.Module):
         self.input_dim = input_dim
         self.embed_dim = embed_dim
 
-        # CNN blocks - 注意命名必须是 cnn_block1, cnn_block2
         self.cnn_block1 = nn.Sequential(
             nn.Conv1d(in_channels=input_dim, out_channels=embed_dim // 2, kernel_size=3, padding=1),
             nn.BatchNorm1d(embed_dim // 2),
@@ -442,7 +445,6 @@ class CBAMCNNTransformer(nn.Module):
         )
         self.cbam2 = CBAMBlock(embed_dim, reduction=16, kernel_size=5)
 
-        # 注意命名必须是 positional_encoding
         self.positional_encoding = PositionalEncoding(embed_dim)
 
         encoder_layer = nn.TransformerEncoderLayer(
@@ -453,15 +455,11 @@ class CBAMCNNTransformer(nn.Module):
             activation='gelu',
             batch_first=True
         )
-        # 注意命名必须是 transformer_encoder
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
 
-        # 注意命名必须是 attention_pool
         self.attention_pool = nn.MultiheadAttention(embed_dim, num_heads=2, dropout=dropout, batch_first=True)
-        # 注意命名必须是 pool_query
         self.pool_query = nn.Parameter(torch.randn(1, 1, embed_dim) * 0.02)
 
-        # 注意命名必须是 fc_out
         self.fc_out = nn.Sequential(
             nn.Linear(embed_dim, 64),
             nn.LayerNorm(64),
@@ -502,19 +500,15 @@ class CBAMCNNTransformer(nn.Module):
         return out.squeeze(1)
 
 
-
-
-import random
-import copy
-
+# ============================================================================
+# Utility Functions
+# ============================================================================
 def set_seed(seed: int = 42):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
-
-
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
@@ -585,49 +579,48 @@ def read_csv(file_or_path):
                 continue
     return None
 
-from sklearn.preprocessing import StandardScaler
 
 class IdentityScaler:
-    def fit(self, X): return self
-    def transform(self, X): return X
-    def inverse_transform(self, X): return X
+    """Dummy scaler that returns input unchanged."""
+    def fit(self, X): 
+        return self
+    def transform(self, X): 
+        return X
+    def inverse_transform(self, X): 
+        return X
 
 
+# ============================================================================
+# FIXED: Model Loading Functions
+# ============================================================================
 def _infer_input_dim_from_state_dict(sd: dict):
     """
     Infer input_dim from the first Conv1d layer weight.
     Conv1d.weight shape: [out_channels, in_channels, kernel_size]
-
-    Checks both new and legacy key names.
     """
-    # List of possible key names for the first conv layer
     possible_keys = [
         "cnn_block1.0.weight",  # New naming
-        "cnn1.0.weight",  # Legacy naming
+        "cnn1.0.weight",        # Legacy naming  
     ]
-
+    
     for k in possible_keys:
         if k in sd:
             weight = sd[k]
             if hasattr(weight, "shape") and len(weight.shape) == 3:
-                return int(weight.shape[1])  # in_channels dimension
-
+                return int(weight.shape[1])
+    
     return None
 
 
 def _remap_legacy_state_dict(sd: dict) -> dict:
-    """
-    Remap legacy model key names to current architecture names.
-    """
+    """Remap legacy model key names to current architecture names."""
     out = {}
     for k, v in sd.items():
         nk = k
 
-        # Handle standalone 'query' key
         if nk == "query":
             nk = "pool_query"
 
-        # Prefix mappings
         prefix_mappings = [
             ("cnn1.", "cnn_block1."),
             ("cnn2.", "cnn_block2."),
@@ -640,7 +633,7 @@ def _remap_legacy_state_dict(sd: dict) -> dict:
             ("cbam2.ca.", "cbam2.channel_attention."),
             ("cbam2.sa.", "cbam2.spatial_attention."),
         ]
-
+        
         for old_prefix, new_prefix in prefix_mappings:
             if nk.startswith(old_prefix):
                 nk = nk.replace(old_prefix, new_prefix, 1)
@@ -650,100 +643,64 @@ def _remap_legacy_state_dict(sd: dict) -> dict:
     return out
 
 
-class IdentityScaler:
-    """Dummy scaler that returns input unchanged."""
-
-    def fit(self, X):
-        return self
-
-    def transform(self, X):
-        return X
-
-    def inverse_transform(self, X):
-        return X
-
-
-def load_model_file(path_or_file, device, CBAMCNNTransformer):
+def load_model_file(path_or_file, device):
     """
-    Load a model file with full backward compatibility.
-
-    Supports:
-    1. New format: {'model_state_dict', 'input_dim', 'feature_names', 'scaler_X', 'scaler_y', ...}
-    2. Old format: {'model_state_dict', 'train_losses', ...} without input_dim/feature_names/scaler
-    3. Pure state_dict: Just torch.save(model.state_dict())
-
-    Args:
-        path_or_file: Path string or file-like object
-        device: torch device
-        CBAMCNNTransformer: The model class
-
-    Returns:
-        model: Loaded model
-        ckpt: Checkpoint dict with all necessary fields populated
+    Load model with full backward compatibility for legacy checkpoints.
+    
+    FIXED: Now properly handles models without 'input_dim' key by inferring
+    from model weights or feature_names.
     """
-    import torch
-
-    # Load checkpoint
     ckpt = torch.load(path_or_file, map_location=device, weights_only=False)
-
+    
     # Handle different checkpoint formats
     if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
         sd_raw = ckpt["model_state_dict"]
     else:
-        # Pure state_dict was saved
         sd_raw = ckpt
         ckpt = {"model_state_dict": sd_raw}
-
+    
     # Remap legacy key names
     sd = _remap_legacy_state_dict(sd_raw)
-
+    
     # ========================================
-    # CRITICAL: Infer input_dim robustly
+    # CRITICAL FIX: Infer input_dim robustly
+    # Never use ckpt['input_dim'] directly!
     # ========================================
     input_dim = None
-
-    # Method 1: Try to get from checkpoint directly
-    if "input_dim" in ckpt and ckpt["input_dim"] is not None:
+    
+    # Method 1: Get from checkpoint (using .get() to avoid KeyError)
+    stored_dim = ckpt.get("input_dim")
+    if stored_dim is not None:
         try:
-            input_dim = int(ckpt["input_dim"])
+            input_dim = int(stored_dim)
         except (ValueError, TypeError):
             pass
-
-    # Method 2: Infer from feature_names if available
+    
+    # Method 2: Infer from feature_names
     if input_dim is None:
-        fn = ckpt.get("feature_names", None)
+        fn = ckpt.get("feature_names")
         if isinstance(fn, (list, tuple)) and len(fn) > 0:
             input_dim = len(fn)
-
-    # Method 3: Infer from model weights (most reliable for legacy models)
+    
+    # Method 3: Infer from Conv1d weights (most reliable for legacy)
     if input_dim is None:
         input_dim = _infer_input_dim_from_state_dict(sd)
-
-    # If still None, we cannot proceed
+    
     if input_dim is None:
         raise ValueError(
             "Cannot determine input_dim from checkpoint. "
-            "The model file may be corrupted or in an unsupported format. "
-            "Expected to find either 'input_dim' key, 'feature_names' list, "
-            "or valid Conv1d weights to infer from."
+            "Model file may be corrupted or unsupported format."
         )
-
+    
     input_dim = int(input_dim)
-
-    # ========================================
-    # Get model configuration with defaults
-    # ========================================
-    cfg = ckpt.get("config", {})
-    if not isinstance(cfg, dict):
-        cfg = {}
-
+    
+    # Get config with defaults
+    cfg = ckpt.get("config") or {}
     num_heads = int(cfg.get("num_heads", 8))
     num_layers = int(cfg.get("num_layers", 4))
     dropout = float(cfg.get("dropout", 0.3))
-
-    # ========================================
-    # Build and load model
-    # ========================================
+    
+    # Build model
     model = CBAMCNNTransformer(
         input_dim=input_dim,
         embed_dim=128,
@@ -751,36 +708,39 @@ def load_model_file(path_or_file, device, CBAMCNNTransformer):
         num_layers=num_layers,
         dropout=dropout
     ).to(device)
-
-    # Load weights with strict=False to handle partial matches
+    
+    # Load weights (strict=False for partial matches)
     missing, unexpected = model.load_state_dict(sd, strict=False)
-
-    # ========================================
-    # Populate checkpoint with all required fields
-    # ========================================
+    
+    # Populate checkpoint with required fields
     ckpt["input_dim"] = input_dim
     ckpt["config"] = cfg
-
+    
     if "seq_length" not in ckpt:
         ckpt["seq_length"] = 12
-
+    
     if "rated_capacity" not in ckpt:
         ckpt["rated_capacity"] = 2.0
-
-    if "scaler_X" not in ckpt or ckpt["scaler_X"] is None:
+    
+    if ckpt.get("scaler_X") is None:
         ckpt["scaler_X"] = IdentityScaler()
-
-    if "scaler_y" not in ckpt or ckpt["scaler_y"] is None:
+    
+    if ckpt.get("scaler_y") is None:
         ckpt["scaler_y"] = IdentityScaler()
-
-    if "feature_names" not in ckpt or not isinstance(ckpt.get("feature_names"), (list, tuple)):
+    
+    if not isinstance(ckpt.get("feature_names"), (list, tuple)):
         ckpt["feature_names"] = [f"f{i}" for i in range(input_dim)]
-
-    # Optional: Log loading info
+    
+    # Optional warning
     if missing or unexpected:
-        print(f"Model loaded with strict=False: {len(missing)} missing, {len(unexpected)} unexpected keys")
-
+        st.warning(
+            f"Model loaded (strict=False): {len(missing)} missing, {len(unexpected)} unexpected keys. "
+            "This is normal for legacy models."
+        )
+    
     return model, ckpt
+
+
 
 
 # ============================================================================
@@ -886,6 +846,15 @@ def setup_plot():
         'axes.titlesize': 12,
         'axes.labelsize': 11,
     })
+
+
+def get_rated_capacity(ckpt: dict, user_value: float) -> float:
+    if isinstance(ckpt, dict) and ckpt.get('rated_capacity'):
+        try:
+            return float(ckpt['rated_capacity'])
+        except:
+            pass
+    return float(user_value)
 
 
 # ============================================================================
@@ -1109,11 +1078,12 @@ def categorize_mechanisms(names, importance):
     return result_names, contrib
 
 
+
+
 # ============================================================================
 # Training & Prediction Functions
 # ============================================================================
 def train_model(train_features, train_labels, config, progress_cb=None):
-
     seed = int(config.get('seed', 42))
     set_seed(seed)
 
@@ -1122,7 +1092,6 @@ def train_model(train_features, train_labels, config, progress_cb=None):
     scaler_X = StandardScaler()
     scaler_y = StandardScaler()
 
-    # 标准化
     X_scaled = scaler_X.fit_transform(train_features.values)
     y_scaled = scaler_y.fit_transform(train_labels.values.reshape(-1, 1)).flatten()
 
@@ -1134,7 +1103,7 @@ def train_model(train_features, train_labels, config, progress_cb=None):
 
     val_ratio = float(config.get('val_ratio', 0.1))
     val_size = int(val_ratio * len(dataset))
-    val_size = max(1, val_size)  # 至少 1
+    val_size = max(1, val_size)
     train_size = max(1, len(dataset) - val_size)
 
     g = torch.Generator().manual_seed(seed)
@@ -1177,7 +1146,6 @@ def train_model(train_features, train_labels, config, progress_cb=None):
     no_improve = 0
 
     for epoch in range(num_epochs):
-        # ----------------- train -----------------
         model.train()
         total_loss = 0.0
         total_n = 0
@@ -1199,7 +1167,6 @@ def train_model(train_features, train_labels, config, progress_cb=None):
         train_loss = total_loss / max(1, total_n)
         train_losses.append(train_loss)
 
-        # ----------------- val -----------------
         model.eval()
         total_vloss = 0.0
         total_vn = 0
@@ -1221,13 +1188,11 @@ def train_model(train_features, train_labels, config, progress_cb=None):
         val_loss = total_vloss / max(1, total_vn)
         val_losses.append(val_loss)
 
-        # 对齐代码1：用 R2 作为 best 选择标准（在“标准化空间”计算即可）
         val_r2 = r2_score(y_true_val, y_pred_val) if len(y_true_val) > 1 else 0.0
         val_r2_list.append(val_r2)
 
         scheduler.step(val_loss)
 
-        # ----------------- best / early stop -----------------
         if val_r2 > best_val_r2:
             best_val_r2 = val_r2
             best_state = copy.deepcopy(model.state_dict())
@@ -1246,14 +1211,6 @@ def train_model(train_features, train_labels, config, progress_cb=None):
 
     return model, scaler_X, scaler_y, train_losses, val_losses, train_features.columns.tolist()
 
-def get_rated_capacity(ckpt: dict, user_value: float) -> float:
-
-    if isinstance(ckpt, dict) and 'rated_capacity' in ckpt and ckpt['rated_capacity']:
-        try:
-            return float(ckpt['rated_capacity'])
-        except:
-            pass
-    return float(user_value)
 
 def predict_with_model(model, test_features, test_labels, scaler_X, scaler_y, seq_length, device):
     X_scaled = scaler_X.transform(test_features.values)
@@ -1346,9 +1303,8 @@ def render_nav(lang):
 # Results Section
 # ============================================================================
 def render_results(results, selected_cycle, lang):
-
-    preds = np.array(results['predictions'], dtype=float)   # 0~1
-    acts = np.array(results['actuals'], dtype=float)        # 0~1
+    preds = np.array(results['predictions'], dtype=float)
+    acts = np.array(results['actuals'], dtype=float)
     importance = np.array(results['feature_importance'], dtype=float)
     shap_vals = np.array(results['shap_values'], dtype=float)
     names = results['feature_names']
@@ -1358,12 +1314,8 @@ def render_results(results, selected_cycle, lang):
         st.error("No prediction results to display.")
         return
 
-    # 防止越界
     selected_cycle = int(np.clip(selected_cycle, 0, len(preds) - 1))
 
-    # =========================
-    # SOH Display and Metrics
-    # =========================
     col1, col2, col3, col4 = st.columns([1.5, 0.8, 0.8, 0.8])
 
     with col1:
@@ -1381,7 +1333,6 @@ def render_results(results, selected_cycle, lang):
             <span class="status-badge {status_class}">{status_text}</span>
         </div>
         """, unsafe_allow_html=True)
-
 
     preds_pct = preds
     acts_pct = acts
@@ -1413,17 +1364,11 @@ def render_results(results, selected_cycle, lang):
         </div>
         """, unsafe_allow_html=True)
 
-    # =========================
-    # Prediction Trend (用百分数画图)
-    # =========================
     st.markdown(f'<div class="section-header">{T("prediction_trend", lang)}</div>', unsafe_allow_html=True)
     fig_trend = plot_prediction_trend(acts_pct, preds_pct, selected_cycle)
     st.pyplot(fig_trend)
     plt.close(fig_trend)
 
-    # =========================
-    # SHAP Analysis
-    # =========================
     st.markdown(f'<div class="section-header">{T("shap_title", lang)}</div>', unsafe_allow_html=True)
 
     col1, col2 = st.columns(2)
@@ -1434,21 +1379,16 @@ def render_results(results, selected_cycle, lang):
         plt.close(fig1)
 
     with col2:
-        # 取对应cycle的shap（若shap样本数不足则取最后一个）
         idx = min(selected_cycle, shap_vals.shape[0] - 1) if shap_vals.ndim == 2 and shap_vals.shape[0] > 0 else 0
         cycle_shap = shap_vals[idx] if shap_vals.ndim == 2 else np.zeros(len(names))
-
-        # base_val 用 0~1（不再 /100）
-        base_val = float(np.mean(acts))  # 0~1
+        base_val = float(np.mean(acts))
         fig2 = plot_waterfall(names, cycle_shap, base_val, f"(Cycle {selected_cycle + 1})")
         st.pyplot(fig2)
         plt.close(fig2)
 
-    # Beeswarm and Mechanism
     col1, col2 = st.columns(2)
 
     with col1:
-        # beeswarm 仍用 shap_vals 与 feat_scaled（可保持原逻辑）
         fig3 = plot_beeswarm(names, shap_vals, feat_scaled[:len(shap_vals)] if feat_scaled is not None else None)
         st.pyplot(fig3)
         plt.close(fig3)
@@ -1474,9 +1414,6 @@ def render_results(results, selected_cycle, lang):
             </div>
             """, unsafe_allow_html=True)
 
-    # =========================
-    # Download (输出百分数)
-    # =========================
     st.markdown("<br>", unsafe_allow_html=True)
     results_df = pd.DataFrame({
         'Cycle': np.arange(1, len(preds) + 1),
@@ -1492,6 +1429,9 @@ def render_results(results, selected_cycle, lang):
         file_name="soh_predictions.csv",
         mime="text/csv"
     )
+
+
+
 
 # ============================================================================
 # Page: Demo
@@ -1522,8 +1462,8 @@ def page_demo(lang):
                 device = get_device()
                 model, ckpt = load_model_file(model_files[0], device)
 
-                scaler_X = ckpt['scaler_X']
-                scaler_y = ckpt['scaler_y']
+                scaler_X = ckpt.get('scaler_X', IdentityScaler())
+                scaler_y = ckpt.get('scaler_y', IdentityScaler())
                 seq_length = int(ckpt.get('seq_length', 12))
                 rated_cap = float(ckpt.get('rated_capacity', 2.0))
                 input_dim = int(ckpt.get("input_dim", 0))
@@ -1534,13 +1474,11 @@ def page_demo(lang):
                     if target_col in df.columns:
                         df['SOH'] = df[target_col] / rated_cap
 
-                        # drop无用列
                         drops = ['voltage mean', 'voltage std', 'current mean', 'current std']
                         avail_drops = [c for c in drops if c in df.columns]
                         if avail_drops:
                             df = df.drop(avail_drops, axis=1)
 
-                        # ====== ✅ 关键：特征列选择（兼容legacy f0..fN） ======
                         feature_names = ckpt.get('feature_names', None)
 
                         exclude = {target_col, "SOH"}
@@ -1551,14 +1489,14 @@ def page_demo(lang):
 
                         if not use_ckpt_cols:
                             if input_dim <= 0:
-                                st.warning("Demo: 模型缺少 input_dim，回退到生成demo数据。")
+                                st.warning("Demo: Model missing input_dim, falling back to demo data.")
                                 raise RuntimeError("demo missing input_dim")
                             if len(cand) < input_dim:
-                                st.warning("Demo: CSV数值列不足，回退到生成demo数据。")
+                                st.warning("Demo: CSV has insufficient numeric columns, falling back to demo data.")
                                 raise RuntimeError("demo not enough cols")
                             feature_names = cand[:input_dim]
                             ckpt["feature_names"] = feature_names
-                            st.warning(f"Demo: 旧模型未保存 feature_names，已从CSV自动选择 {len(feature_names)} 列用于预测。")
+                            st.warning(f"Demo: Legacy model without feature_names, auto-selected {len(feature_names)} columns.")
 
                         test_features = df[feature_names].copy()
                         test_labels = df['SOH']
@@ -1609,7 +1547,6 @@ def page_demo(lang):
         st.session_state.demo_cycle = selected_cycle
 
     render_results(results, selected_cycle, lang)
-
 
 
 # ============================================================================
@@ -1870,73 +1807,31 @@ def page_predict(lang):
                 with st.spinner(T('processing', lang)):
                     device = get_device()
 
-                    # ====== load model ======
+                    # Load model
                     if model_source == T('load_from_repo', lang):
                         model, ckpt = load_model_file(selected_model, device)
                     else:
-                        ckpt = torch.load(uploaded_model, map_location=device, weights_only=False)
+                        model, ckpt = load_model_file(uploaded_model, device)
 
-                        # 兼容：如果上传的是纯state_dict
-                        if "model_state_dict" not in ckpt:
-                            ckpt = {"model_state_dict": ckpt}
-
-                        cfg = ckpt.get('config', {})
-                        sd = ckpt.get("model_state_dict", ckpt)
-
-                        # 尝试从sd推input_dim
-                        input_dim = ckpt.get("input_dim", None)
-                        if input_dim is None:
-                            input_dim = _infer_input_dim_from_state_dict(sd)
-                        if input_dim is None:
-                            raise RuntimeError("Uploaded model missing input_dim and cannot infer from weights.")
-
-                        model = CBAMCNNTransformer(
-                            input_dim=int(input_dim),
-                            embed_dim=128,
-                            num_heads=int(cfg.get('num_heads', 8)),
-                            num_layers=int(cfg.get('num_layers', 4)),
-                            dropout=float(cfg.get('dropout', 0.3))
-                        ).to(device)
-
-                        sd = _remap_legacy_state_dict(sd)
-                        model.load_state_dict(sd, strict=False)
-
-                        ckpt["input_dim"] = int(input_dim)
-                        ckpt["config"] = cfg
-                        if "seq_length" not in ckpt:
-                            ckpt["seq_length"] = 12
-                        if "rated_capacity" not in ckpt:
-                            ckpt["rated_capacity"] = float(rated_cap)
-                        if "scaler_X" not in ckpt:
-                            ckpt["scaler_X"] = IdentityScaler()
-                        if "scaler_y" not in ckpt:
-                            ckpt["scaler_y"] = IdentityScaler()
-                        if "feature_names" not in ckpt:
-                            ckpt["feature_names"] = [f"f{i}" for i in range(int(input_dim))]
-
-                    scaler_X = ckpt['scaler_X']
-                    scaler_y = ckpt['scaler_y']
-                    seq_length = int(ckpt['seq_length'])
-
-                    # 额定容量：优先用模型保存的
+                    scaler_X = ckpt.get('scaler_X', IdentityScaler())
+                    scaler_y = ckpt.get('scaler_y', IdentityScaler())
+                    seq_length = int(ckpt.get('seq_length', 12))
                     rated_cap_use = get_rated_capacity(ckpt, rated_cap)
 
-                    # ====== read test ======
+                    # Read test data
                     test_df = read_csv(test_file)
                     if test_df is None:
                         st.error("Could not read test CSV.")
                         return
 
-                    # 构造 SOH（0~1）
                     test_df['SOH'] = test_df[target_col] / rated_cap_use
 
-                    # drop无用列
                     drops = ['voltage mean', 'voltage std', 'current mean', 'current std']
                     avail_drops = [c for c in drops if c in test_df.columns]
                     if avail_drops:
                         test_df = test_df.drop(avail_drops, axis=1)
 
-                    # ====== ✅ 关键：特征列选择（兼容legacy f0..fN） ======
+                    # Feature column selection
                     feature_names = ckpt.get('feature_names', None)
                     input_dim = int(ckpt.get("input_dim", 0))
 
@@ -1948,14 +1843,14 @@ def page_predict(lang):
 
                     if not use_ckpt_cols:
                         if input_dim <= 0:
-                            st.error("模型缺少 input_dim，无法自动选择特征列。")
+                            st.error("Model missing input_dim, cannot auto-select feature columns.")
                             return
                         if len(cand) < input_dim:
-                            st.error(f"CSV数值特征列不足：需要 {input_dim} 列，但只有 {len(cand)} 列。")
+                            st.error(f"CSV has insufficient numeric columns: need {input_dim}, found {len(cand)}.")
                             return
                         feature_names = cand[:input_dim]
                         ckpt["feature_names"] = feature_names
-                        st.warning(f"旧模型未保存 feature_names，已从CSV自动选择 {len(feature_names)} 列用于预测。")
+                        st.warning(f"Legacy model without feature_names, auto-selected {len(feature_names)} columns.")
 
                     test_features = test_df[feature_names].copy()
                     test_labels = test_df['SOH']
@@ -1991,7 +1886,6 @@ def page_predict(lang):
         results = st.session_state.predict_results
         selected = st.slider("Select Cycle", 0, len(results['predictions']) - 1, 0, key='predict_cycle')
         render_results(results, selected, lang)
-
 
 
 # ============================================================================
@@ -2046,7 +1940,6 @@ def main():
 
     render_nav(lang)
 
-    # Navigation buttons
     col1, col2, col3, col4, col5 = st.columns(5)
 
     with col1:
@@ -2078,7 +1971,6 @@ def main():
     st.markdown(f"<hr style='margin: 1rem 0; border: none; border-top: 1px solid {COLORS['border']};'>",
                 unsafe_allow_html=True)
 
-    # Render page
     if page == 'demo':
         page_demo(lang)
     elif page == 'train':
