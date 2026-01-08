@@ -514,7 +514,7 @@ def set_seed(seed: int = 42):
 
 
 def seed_worker(worker_id: int):
-    worker_seed = torch.initial_seed() % 2**32
+    worker_seed = torch.initial_seed() % 2 ** 32
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
@@ -581,39 +581,41 @@ def read_csv(file_or_path):
 
 
 class IdentityScaler:
-    """Dummy scaler that returns input unchanged."""
-    def fit(self, X): 
+    """当模型没有保存scaler时使用的占位符"""
+
+    def fit(self, X):
         return self
-    def transform(self, X): 
+
+    def transform(self, X):
         return X
-    def inverse_transform(self, X): 
+
+    def inverse_transform(self, X):
         return X
 
 
-# ============================================================================
-# FIXED: Model Loading Functions
-# ============================================================================
 def _infer_input_dim_from_state_dict(sd: dict):
     """
-    Infer input_dim from the first Conv1d layer weight.
+    从Conv1d权重推断input_dim
     Conv1d.weight shape: [out_channels, in_channels, kernel_size]
+    in_channels 就是 input_dim
     """
+    # 检查可能的key名称（新命名和旧命名）
     possible_keys = [
-        "cnn_block1.0.weight",  # New naming
-        "cnn1.0.weight",        # Legacy naming  
+        "cnn_block1.0.weight",  # 新命名
+        "cnn1.0.weight",  # 旧命名
     ]
-    
+
     for k in possible_keys:
         if k in sd:
             weight = sd[k]
             if hasattr(weight, "shape") and len(weight.shape) == 3:
-                return int(weight.shape[1])
-    
+                return int(weight.shape[1])  # in_channels
+
     return None
 
 
 def _remap_legacy_state_dict(sd: dict) -> dict:
-    """Remap legacy model key names to current architecture names."""
+    """将旧模型的key名称映射到新架构"""
     out = {}
     for k, v in sd.items():
         nk = k
@@ -633,7 +635,7 @@ def _remap_legacy_state_dict(sd: dict) -> dict:
             ("cbam2.ca.", "cbam2.channel_attention."),
             ("cbam2.sa.", "cbam2.spatial_attention."),
         ]
-        
+
         for old_prefix, new_prefix in prefix_mappings:
             if nk.startswith(old_prefix):
                 nk = nk.replace(old_prefix, new_prefix, 1)
@@ -645,62 +647,66 @@ def _remap_legacy_state_dict(sd: dict) -> dict:
 
 def load_model_file(path_or_file, device):
     """
-    Load model with full backward compatibility for legacy checkpoints.
-    
-    FIXED: Now properly handles models without 'input_dim' key by inferring
-    from model weights or feature_names.
+    加载模型文件，完全兼容旧版checkpoint
+
+    修复：不再直接访问 ckpt['input_dim']，而是：
+    1. 先尝试 .get() 获取
+    2. 从 feature_names 推断
+    3. 从模型权重推断（最可靠）
     """
     ckpt = torch.load(path_or_file, map_location=device, weights_only=False)
-    
-    # Handle different checkpoint formats
+
+    # 处理不同的checkpoint格式
     if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
         sd_raw = ckpt["model_state_dict"]
     else:
+        # 纯state_dict格式
         sd_raw = ckpt
         ckpt = {"model_state_dict": sd_raw}
-    
-    # Remap legacy key names
+
+    # 重映射旧版key名称
     sd = _remap_legacy_state_dict(sd_raw)
-    
+
     # ========================================
-    # CRITICAL FIX: Infer input_dim robustly
-    # Never use ckpt['input_dim'] directly!
+    # 关键修复：安全获取 input_dim
+    # 绝不使用 ckpt['input_dim'] 直接访问！
     # ========================================
     input_dim = None
-    
-    # Method 1: Get from checkpoint (using .get() to avoid KeyError)
+
+    # 方法1：从checkpoint获取（使用.get()避免KeyError）
     stored_dim = ckpt.get("input_dim")
     if stored_dim is not None:
         try:
             input_dim = int(stored_dim)
         except (ValueError, TypeError):
             pass
-    
-    # Method 2: Infer from feature_names
+
+    # 方法2：从feature_names推断
     if input_dim is None:
         fn = ckpt.get("feature_names")
         if isinstance(fn, (list, tuple)) and len(fn) > 0:
             input_dim = len(fn)
-    
-    # Method 3: Infer from Conv1d weights (most reliable for legacy)
+
+    # 方法3：从Conv1d权重推断（最可靠，适用于旧模型）
     if input_dim is None:
         input_dim = _infer_input_dim_from_state_dict(sd)
-    
+
+    # 如果仍然无法确定，抛出有意义的错误
     if input_dim is None:
         raise ValueError(
-            "Cannot determine input_dim from checkpoint. "
-            "Model file may be corrupted or unsupported format."
+            "无法从checkpoint确定input_dim。"
+            "模型文件可能已损坏或格式不支持。"
         )
-    
+
     input_dim = int(input_dim)
-    
-    # Get config with defaults
+
+    # 获取配置（带默认值）
     cfg = ckpt.get("config") or {}
     num_heads = int(cfg.get("num_heads", 8))
     num_layers = int(cfg.get("num_layers", 4))
     dropout = float(cfg.get("dropout", 0.3))
-    
-    # Build model
+
+    # 构建模型
     model = CBAMCNNTransformer(
         input_dim=input_dim,
         embed_dim=128,
@@ -708,40 +714,42 @@ def load_model_file(path_or_file, device):
         num_layers=num_layers,
         dropout=dropout
     ).to(device)
-    
-    # Load weights (strict=False for partial matches)
+
+    # 加载权重（strict=False处理部分匹配）
     missing, unexpected = model.load_state_dict(sd, strict=False)
-    
-    # Populate checkpoint with required fields
+
+    # 填充checkpoint中的必需字段
     ckpt["input_dim"] = input_dim
     ckpt["config"] = cfg
-    
+
     if "seq_length" not in ckpt:
         ckpt["seq_length"] = 12
-    
+
     if "rated_capacity" not in ckpt:
         ckpt["rated_capacity"] = 2.0
-    
+
+    # 关键：使用.get()检查None，不要用 "not in"
     if ckpt.get("scaler_X") is None:
         ckpt["scaler_X"] = IdentityScaler()
-    
+
     if ckpt.get("scaler_y") is None:
         ckpt["scaler_y"] = IdentityScaler()
-    
+
     if not isinstance(ckpt.get("feature_names"), (list, tuple)):
         ckpt["feature_names"] = [f"f{i}" for i in range(input_dim)]
-    
-    # Optional warning
+
+    # 可选：显示警告
     if missing or unexpected:
-        st.warning(
-            f"Model loaded (strict=False): {len(missing)} missing, {len(unexpected)} unexpected keys. "
-            "This is normal for legacy models."
-        )
-    
+        try:
+            import streamlit as st
+            st.warning(
+                f"模型已加载（strict=False）：{len(missing)} 个缺失key，{len(unexpected)} 个意外key。"
+                "这对于旧版模型是正常的。"
+            )
+        except:
+            pass
+
     return model, ckpt
-
-
-
 
 # ============================================================================
 # Demo Data Generator
@@ -1076,8 +1084,6 @@ def categorize_mechanisms(names, importance):
         contrib = contrib / contrib.max()
 
     return result_names, contrib
-
-
 
 
 # ============================================================================
@@ -1431,8 +1437,6 @@ def render_results(results, selected_cycle, lang):
     )
 
 
-
-
 # ============================================================================
 # Page: Demo
 # ============================================================================
@@ -1485,7 +1489,8 @@ def page_demo(lang):
                         cand = [c for c in df.columns
                                 if c not in exclude and pd.api.types.is_numeric_dtype(df[c])]
 
-                        use_ckpt_cols = isinstance(feature_names, (list, tuple)) and all((c in df.columns) for c in feature_names)
+                        use_ckpt_cols = isinstance(feature_names, (list, tuple)) and all(
+                            (c in df.columns) for c in feature_names)
 
                         if not use_ckpt_cols:
                             if input_dim <= 0:
@@ -1496,7 +1501,8 @@ def page_demo(lang):
                                 raise RuntimeError("demo not enough cols")
                             feature_names = cand[:input_dim]
                             ckpt["feature_names"] = feature_names
-                            st.warning(f"Demo: Legacy model without feature_names, auto-selected {len(feature_names)} columns.")
+                            st.warning(
+                                f"Demo: Legacy model without feature_names, auto-selected {len(feature_names)} columns.")
 
                         test_features = df[feature_names].copy()
                         test_labels = df['SOH']
@@ -1839,7 +1845,8 @@ def page_predict(lang):
                     cand = [c for c in test_df.columns
                             if c not in exclude and pd.api.types.is_numeric_dtype(test_df[c])]
 
-                    use_ckpt_cols = isinstance(feature_names, (list, tuple)) and all((c in test_df.columns) for c in feature_names)
+                    use_ckpt_cols = isinstance(feature_names, (list, tuple)) and all(
+                        (c in test_df.columns) for c in feature_names)
 
                     if not use_ckpt_cols:
                         if input_dim <= 0:
