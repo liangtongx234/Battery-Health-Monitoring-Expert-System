@@ -520,9 +520,8 @@ def remap_legacy_state_dict(state_dict: dict) -> dict:
     for k, v in state_dict.items():
         nk = k
 
-
-        if nk == "query":
-            nk = "pool_query"
+        if nk == "query":          # 旧版
+            nk = "pool_query"      # 新版
 
         for old, new in mapping_prefix:
             if nk.startswith(old):
@@ -531,6 +530,16 @@ def remap_legacy_state_dict(state_dict: dict) -> dict:
 
         new_sd[nk] = v
     return new_sd
+
+
+def infer_input_dim_from_state_dict(sd: dict) -> int | None:
+    # 旧命名
+    if "cnn1.0.weight" in sd:
+        return int(sd["cnn1.0.weight"].shape[1])
+    # 新命名
+    if "cnn_block1.0.weight" in sd:
+        return int(sd["cnn_block1.0.weight"].shape[1])
+    return None
 
 
 def load_model_from_path(model_path, device):
@@ -673,27 +682,64 @@ def remap_legacy_state_dict(state_dict: dict) -> dict:
 
 
 def load_model_file(path, device):
-    ckpt = torch.load(path, map_location=device, weights_only=False)
-    cfg = ckpt.get('config', {})
+    raw = torch.load(path, map_location=device, weights_only=False)
 
-    model = CBAMCNNTransformer(
-        input_dim=ckpt['input_dim'],
-        embed_dim=128,
-        num_heads=cfg.get('num_heads', 8),
-        num_layers=cfg.get('num_layers', 4),
-        dropout=cfg.get('dropout', 0.3)
-    ).to(device)
+    # 兼容：有的人直接 torch.save(model.state_dict())
+    if isinstance(raw, dict) and ("model_state_dict" in raw or "cnn1.0.weight" in raw or "cnn_block1.0.weight" in raw):
+        ckpt = raw if "model_state_dict" in raw else {"model_state_dict": raw}
+    else:
+        raise RuntimeError("Model file format not recognized (expect dict or state_dict).")
 
-    sd = ckpt['model_state_dict']
+    sd = ckpt["model_state_dict"]
 
-    # 判定是否旧命名（代码1）
+    # 判断是否旧命名（代码1）
     legacy_markers = ("cnn1.", "cnn2.", "query", "pos_enc.", "transformer.", "attn_pool.", "fc.", "cbam1.ca.", "cbam1.sa.")
     is_legacy = any(k == "query" or any(k.startswith(m) for m in legacy_markers) for k in sd.keys())
-
     if is_legacy:
         sd = remap_legacy_state_dict(sd)
 
+    # -------- 推断 / 获取 input_dim --------
+    input_dim = ckpt.get("input_dim", None)
+    if input_dim is None:
+        if "feature_names" in ckpt and ckpt["feature_names"] is not None:
+            input_dim = len(ckpt["feature_names"])
+        else:
+            input_dim = infer_input_dim_from_state_dict(sd)
+
+    if input_dim is None:
+        raise RuntimeError(
+            "Checkpoint 缺少 input_dim，且无法从 state_dict 推断。\n"
+            "请在代码1保存时加入 input_dim 或 feature_names。"
+        )
+
+    cfg = ckpt.get("config", {}) or {}
+
+    model = CBAMCNNTransformer(
+        input_dim=input_dim,
+        embed_dim=128,
+        num_heads=cfg.get("num_heads", 8),
+        num_layers=cfg.get("num_layers", 4),
+        dropout=cfg.get("dropout", 0.3)
+    ).to(device)
+
+    # strict=True 更安全；如果你想“能加载就行”，可以改 strict=False
     model.load_state_dict(sd, strict=True)
+
+    # -------- 关键依赖项检查（预测时一定会用）--------
+    missing = []
+    for k in ["feature_names", "seq_length", "scaler_X", "scaler_y"]:
+        if k not in ckpt:
+            missing.append(k)
+    if missing:
+        raise RuntimeError(
+            f"模型已成功加载，但 checkpoint 缺少预测所需字段：{missing}\n"
+            f"请按我下面给的【代码1保存模板】重新保存模型，再上传到 saved_models/。"
+        )
+
+    # 补回 remap 后的 state_dict（可选）
+    ckpt["model_state_dict"] = sd
+    ckpt["input_dim"] = input_dim
+
     return model, ckpt
 
 
