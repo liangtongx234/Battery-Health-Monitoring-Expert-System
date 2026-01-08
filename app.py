@@ -502,6 +502,35 @@ class CBAMCNNTransformer(nn.Module):
         return out.squeeze(1)
 
 
+def remap_legacy_state_dict(state_dict: dict) -> dict:
+    mapping_prefix = [
+        ("cnn1.", "cnn_block1."),
+        ("cnn2.", "cnn_block2."),
+        ("pos_enc.", "positional_encoding."),
+        ("transformer.", "transformer_encoder."),
+        ("attn_pool.", "attention_pool."),
+        ("fc.", "fc_out."),
+        ("cbam1.ca.", "cbam1.channel_attention."),
+        ("cbam1.sa.", "cbam1.spatial_attention."),
+        ("cbam2.ca.", "cbam2.channel_attention."),
+        ("cbam2.sa.", "cbam2.spatial_attention."),
+    ]
+
+    new_sd = {}
+    for k, v in state_dict.items():
+        nk = k
+
+
+        if nk == "query":
+            nk = "pool_query"
+
+        for old, new in mapping_prefix:
+            if nk.startswith(old):
+                nk = new + nk[len(old):]
+                break
+
+        new_sd[nk] = v
+    return new_sd
 
 
 def load_model_from_path(model_path, device):
@@ -657,29 +686,16 @@ def load_model_file(path, device):
 
     sd = ckpt['model_state_dict']
 
-
+    # 判定是否旧命名（代码1）
     legacy_markers = ("cnn1.", "cnn2.", "query", "pos_enc.", "transformer.", "attn_pool.", "fc.", "cbam1.ca.", "cbam1.sa.")
-    is_legacy = any(any(k.startswith(m) or k == m for m in legacy_markers) for k in sd.keys())
+    is_legacy = any(k == "query" or any(k.startswith(m) for m in legacy_markers) for k in sd.keys())
 
     if is_legacy:
         sd = remap_legacy_state_dict(sd)
 
-
-    try:
-        model.load_state_dict(sd, strict=True)
-    except RuntimeError as e:
-
-        missing, unexpected = model.load_state_dict(sd, strict=False)
-        print("[WARN] Loaded with strict=False")
-        print("Missing keys:", missing)
-        print("Unexpected keys:", unexpected)
-        raise RuntimeError(
-            "模型参数仍无法完全匹配：很可能结构(层数/维度)不一致。\n"
-            "建议重新训练并保存模型。\n\n"
-            f"原始错误：{str(e)}"
-        )
-
+    model.load_state_dict(sd, strict=True)
     return model, ckpt
+
 
 
 # ============================================================================
