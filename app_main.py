@@ -2,6 +2,9 @@
 """
 Battery Health Monitoring Expert System
 CBAM-CNN-Transformer with SHAP Interpretability
+GitHub Deployment Ready - Streamlit Cloud Compatible
+
+FIXED VERSION - Resolves KeyError: 'input_dim' for legacy model files
 """
 
 import streamlit as st
@@ -69,7 +72,7 @@ COLORS = {
 LANG = {
     "en": {
         "title": "Battery Health Monitoring System",
-        "subtitle": "CCT-Net(CBAM-CNN-Transformer) with SHAP Interpretability",
+        "subtitle": "CCT-Net (CBAM-CNN-Transformer) with SHAP Interpretability",
         "nav_demo": "Demo",
         "nav_train": "Train",
         "nav_predict": "Predict",
@@ -670,7 +673,11 @@ def load_model_file(path_or_file, device):
     
     # Remap legacy key names
     sd = _remap_legacy_state_dict(sd_raw)
-
+    
+    # ========================================
+    # CRITICAL FIX: Infer input_dim robustly
+    # Never use ckpt['input_dim'] directly!
+    # ========================================
     input_dim = None
     
     # Method 1: Get from checkpoint (using .get() to avoid KeyError)
@@ -744,6 +751,8 @@ def load_model_file(path_or_file, device):
         )
     
     return model, ckpt
+
+
 
 
 # ============================================================================
@@ -922,17 +931,19 @@ def plot_waterfall(names, shap_vals, base_val, suffix=""):
 
     top_idx = np.argsort(np.abs(shap_vals))[::-1][:10]
 
+    # base_val is already in percentage (0-100 range from render_results)
     heights = [base_val]
     colors = [COLORS['primary']]
     labels = ['Base']
 
     for i in top_idx:
         val = shap_vals[i]
+        # SHAP values are small, multiply by 100 for percentage contribution
         heights.append(abs(val) * 100)
         colors.append(COLORS['secondary'] if val > 0 else COLORS['danger'])
         labels.append(names[i][:12] if i < len(names) else f'F{i}')
 
-    final = base_val + shap_vals.sum()
+    final = base_val + shap_vals.sum() * 100
     heights.append(final)
     colors.append(COLORS['primary_dark'])
     labels.append('Final')
@@ -942,14 +953,16 @@ def plot_waterfall(names, shap_vals, base_val, suffix=""):
 
     for i, (p, h) in enumerate(zip(pos, heights)):
         if i == 0 or i == len(pos) - 1:
-            ax.text(p, h + 0.02, f'{h * 100:.1f}%', ha='center', va='bottom', fontsize=10, fontweight='700')
+            # Base and Final: show as percentage directly (no additional *100)
+            ax.text(p, h + 1, f'{h:.1f}%', ha='center', va='bottom', fontsize=10, fontweight='700')
         else:
+            # SHAP contributions: already multiplied by 100 in heights
             orig = shap_vals[top_idx[i - 1]] * 100
-            ax.text(p, h + 0.005, f'{orig:+.2f}%', ha='center', va='bottom', fontsize=9, fontweight='600')
+            ax.text(p, h + 0.5, f'{orig:+.2f}%', ha='center', va='bottom', fontsize=9, fontweight='600')
 
     ax.set_xticks(pos)
     ax.set_xticklabels(labels, rotation=45, ha='right', fontsize=10, fontweight='500')
-    ax.set_ylabel('SOH Contribution', fontweight='600')
+    ax.set_ylabel('SOH (%)', fontweight='600')
     ax.set_title(f'SHAP Waterfall Analysis {suffix}', fontweight='700', pad=12)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
@@ -1403,19 +1416,6 @@ def render_results(results, selected_cycle, lang):
         fig4 = plot_radar(mech_names, mech_contrib)
         st.pyplot(fig4)
         plt.close(fig4)
-
-        for name, contrib in zip(mech_names, mech_contrib):
-            st.markdown(f"""
-            <div class="mechanism-item">
-                <div style="display: flex; justify-content: space-between; font-size: 0.85rem;">
-                    <span style="font-weight: 500;">{name}</span>
-                    <span style="color: {COLORS['primary']}; font-weight: 600;">{contrib:.1f}%</span>
-                </div>
-                <div class="mechanism-bar">
-                    <div class="mechanism-fill" style="width: {contrib}%;"></div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
     results_df = pd.DataFrame({
@@ -1897,30 +1897,83 @@ def page_predict(lang):
 def page_about(lang):
     st.markdown(f'<div class="section-header">{T("about_title", lang)}</div>', unsafe_allow_html=True)
 
+    # Main description
     st.markdown(f"""
     <div class="card">
-        <p style="color: {COLORS['text_secondary']}; margin-bottom: 1.5rem;">{T('about_text', lang)}</p>
-
-        <div style="background: {COLORS['bg']}; padding: 1rem; border-radius: 8px; margin: 1rem 0;">
-            <h4 style="margin: 0 0 0.5rem 0; color: {COLORS['text']};">CBAM-CNN-Transformer Model</h4>
-            <p style="margin: 0; color: {COLORS['text_secondary']}; font-size: 0.9rem;">
-                CNN with Convolutional Block Attention Module (CBAM) and Transformer encoder for SOH prediction.
-            </p>
-        </div>
-
-        <div style="background: {COLORS['bg']}; padding: 1rem; border-radius: 8px; margin: 1rem 0;">
-            <h4 style="margin: 0 0 0.5rem 0; color: {COLORS['text']};">SHAP Interpretability</h4>
-            <p style="margin: 0; color: {COLORS['text_secondary']}; font-size: 0.9rem;">
-                SHAP values for transparent and interpretable predictions.
-            </p>
-        </div>
-
-        <div style="background: {COLORS['bg']}; padding: 1rem; border-radius: 8px; margin: 1rem 0;">
-            <h4 style="margin: 0 0 0.5rem 0; color: {COLORS['text']};">Repository Structure</h4>
-            <p style="margin: 0; color: {COLORS['text_secondary']}; font-size: 0.9rem;">
-                Place data in <code>data/</code> folder and models in <code>saved_models/</code> folder.
-            </p>
-        </div>
+        <p style="color: #5D6D7E; margin-bottom: 1.5rem; font-size: 1rem; line-height: 1.6;">
+            {T('about_text', lang)}
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Model Architecture Card
+    st.markdown("""
+    <div class="card">
+        <h4 style="margin: 0 0 0.8rem 0; color: #2C3E50; font-size: 1.1rem;">
+            CBAM-CNN-Transformer Model
+        </h4>
+        <p style="margin: 0; color: #5D6D7E; font-size: 0.95rem; line-height: 1.5;">
+            A hybrid deep learning architecture combining Convolutional Neural Networks (CNN) with 
+            Convolutional Block Attention Module (CBAM) and Transformer encoder for accurate 
+            State of Health (SOH) prediction. The model captures both local patterns through 
+            CNN layers and global dependencies through self-attention mechanisms.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # SHAP Card
+    st.markdown("""
+    <div class="card">
+        <h4 style="margin: 0 0 0.8rem 0; color: #2C3E50; font-size: 1.1rem;">
+            SHAP Interpretability
+        </h4>
+        <p style="margin: 0; color: #5D6D7E; font-size: 0.95rem; line-height: 1.5;">
+            SHAP (SHapley Additive exPlanations) values provide transparent and interpretable 
+            predictions. Understand which features contribute most to each prediction, enabling 
+            trust and actionable insights for battery management decisions.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Features Card
+    st.markdown("""
+    <div class="card">
+        <h4 style="margin: 0 0 0.8rem 0; color: #2C3E50; font-size: 1.1rem;">
+            Key Features
+        </h4>
+        <ul style="margin: 0; color: #5D6D7E; font-size: 0.95rem; line-height: 1.8; padding-left: 1.2rem;">
+            <li>Real-time SOH prediction with high accuracy</li>
+            <li>Feature importance visualization</li>
+            <li>Interactive SHAP analysis (Waterfall, Beeswarm plots)</li>
+            <li>Support for multiple battery datasets</li>
+            <li>Model training and evaluation interface</li>
+            <li>Export predictions to CSV</li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Repository Structure Card
+    st.markdown("""
+    <div class="card">
+        <h4 style="margin: 0 0 0.8rem 0; color: #2C3E50; font-size: 1.1rem;">
+            Repository Structure
+        </h4>
+        <pre style="background: #F5F7F9; padding: 1rem; border-radius: 6px; font-size: 0.85rem; color: #2C3E50; overflow-x: auto;">
+├── app.py              # Main Streamlit application
+├── data/               # Place your CSV data files here
+│   └── *.csv
+├── saved_models/       # Trained model checkpoints
+│   └── *.pth
+└── requirements.txt    # Python dependencies
+        </pre>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Version info
+    st.markdown("""
+    <div style="text-align: center; margin-top: 2rem; color: #7F8C9A; font-size: 0.85rem;">
+        <p>Battery Health Monitoring System v1.0</p>
+        <p>Built with Streamlit • PyTorch • SHAP</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -1981,7 +2034,7 @@ def main():
                 st.rerun()
 
         with col6:
-            screenshot_label = " Screenshot Mode"
+            screenshot_label = "Screenshot Mode"
             if st.button(screenshot_label, key='btn_screenshot', use_container_width=True):
                 st.session_state.screenshot_mode = True
                 st.rerun()
