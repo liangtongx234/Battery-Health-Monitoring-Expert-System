@@ -2,9 +2,6 @@
 """
 Battery Health Monitoring Expert System
 CBAM-CNN-Transformer with SHAP Interpretability
-GitHub Deployment Ready - Streamlit Cloud Compatible
-
-FIXED VERSION - Resolves KeyError: 'input_dim' for legacy model files
 """
 
 import streamlit as st
@@ -209,6 +206,18 @@ def load_css():
     .stApp { background: var(--bg); }
 
     #MainMenu, footer, header, .stDeployButton { display: none !important; }
+
+    /* Screenshot/Publication Mode */
+    .screenshot-mode .stButton > button { display: none !important; }
+    .screenshot-mode [data-testid="stSidebar"] { display: none !important; }
+    .screenshot-mode .nav-bar { margin: 0 0 1.5rem 0; border-radius: 12px; }
+    .screenshot-mode hr { display: none !important; }
+    
+    @media print {
+        .stButton { display: none !important; }
+        .nav-bar { break-inside: avoid; }
+        .card { break-inside: avoid; }
+    }
 
     .nav-bar {
         background: linear-gradient(135deg, #2C3E50 0%, #34495E 100%);
@@ -661,11 +670,7 @@ def load_model_file(path_or_file, device):
     
     # Remap legacy key names
     sd = _remap_legacy_state_dict(sd_raw)
-    
-    # ========================================
-    # CRITICAL FIX: Infer input_dim robustly
-    # Never use ckpt['input_dim'] directly!
-    # ========================================
+
     input_dim = None
     
     # Method 1: Get from checkpoint (using .get() to avoid KeyError)
@@ -739,8 +744,6 @@ def load_model_file(path_or_file, device):
         )
     
     return model, ckpt
-
-
 
 
 # ============================================================================
@@ -1929,47 +1932,67 @@ def main():
     load_css()
 
     if 'lang' not in st.session_state:
-        st.session_state.lang = 'zh'
+        st.session_state.lang = 'en'  # Default to English for publication
     if 'page' not in st.session_state:
         st.session_state.page = 'demo'
     if 'demo_cycle' not in st.session_state:
         st.session_state.demo_cycle = 0
+    if 'screenshot_mode' not in st.session_state:
+        st.session_state.screenshot_mode = False
 
     lang = st.session_state.lang
     page = st.session_state.page
+    screenshot_mode = st.session_state.screenshot_mode
+
+    # Apply screenshot mode class to body
+    if screenshot_mode:
+        st.markdown('<style>.main { padding-top: 0 !important; } .block-container { padding-top: 1rem !important; }</style>', unsafe_allow_html=True)
 
     render_nav(lang)
 
-    col1, col2, col3, col4, col5 = st.columns(5)
+    # Navigation buttons (hidden in screenshot mode)
+    if not screenshot_mode:
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
 
-    with col1:
-        if st.button(T('nav_demo', lang), key='btn_demo', use_container_width=True):
-            st.session_state.page = 'demo'
+        with col1:
+            if st.button(T('nav_demo', lang), key='btn_demo', use_container_width=True):
+                st.session_state.page = 'demo'
+                st.rerun()
+
+        with col2:
+            if st.button(T('nav_train', lang), key='btn_train', use_container_width=True):
+                st.session_state.page = 'train'
+                st.rerun()
+
+        with col3:
+            if st.button(T('nav_predict', lang), key='btn_predict', use_container_width=True):
+                st.session_state.page = 'predict'
+                st.rerun()
+
+        with col4:
+            if st.button(T('nav_about', lang), key='btn_about', use_container_width=True):
+                st.session_state.page = 'about'
+                st.rerun()
+
+        with col5:
+            lang_label = "English" if lang == 'zh' else "中文"
+            if st.button(lang_label, key='btn_lang', use_container_width=True):
+                st.session_state.lang = 'en' if lang == 'zh' else 'zh'
+                st.rerun()
+
+        with col6:
+            screenshot_label = " Screenshot Mode"
+            if st.button(screenshot_label, key='btn_screenshot', use_container_width=True):
+                st.session_state.screenshot_mode = True
+                st.rerun()
+
+        st.markdown(f"<hr style='margin: 1rem 0; border: none; border-top: 1px solid {COLORS['border']};'>",
+                    unsafe_allow_html=True)
+    else:
+        # Show exit button in screenshot mode
+        if st.button("✕ Exit Screenshot Mode", key='btn_exit_screenshot'):
+            st.session_state.screenshot_mode = False
             st.rerun()
-
-    with col2:
-        if st.button(T('nav_train', lang), key='btn_train', use_container_width=True):
-            st.session_state.page = 'train'
-            st.rerun()
-
-    with col3:
-        if st.button(T('nav_predict', lang), key='btn_predict', use_container_width=True):
-            st.session_state.page = 'predict'
-            st.rerun()
-
-    with col4:
-        if st.button(T('nav_about', lang), key='btn_about', use_container_width=True):
-            st.session_state.page = 'about'
-            st.rerun()
-
-    with col5:
-        lang_label = "English" if lang == 'zh' else "中文"
-        if st.button(lang_label, key='btn_lang', use_container_width=True):
-            st.session_state.lang = 'en' if lang == 'zh' else 'zh'
-            st.rerun()
-
-    st.markdown(f"<hr style='margin: 1rem 0; border: none; border-top: 1px solid {COLORS['border']};'>",
-                unsafe_allow_html=True)
 
     if page == 'demo':
         page_demo(lang)
