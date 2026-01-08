@@ -2,8 +2,7 @@
 """
 Battery Health Monitoring Expert System
 CBAM-CNN-Transformer with SHAP Interpretability
-
-完整集成版本 - 支持训练、预测、SHAP分析
+GitHub Deployment Ready - Streamlit Cloud Compatible
 """
 
 import streamlit as st
@@ -18,401 +17,397 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import matplotlib.pyplot as plt
 import matplotlib
 from matplotlib.colors import LinearSegmentedColormap
-import seaborn as sns
 import os
-import pickle
 import warnings
-import io
-import base64
 from datetime import datetime
-import json
+import glob
 
 warnings.filterwarnings("ignore")
 
-# ================================== 页面配置 ==================================
+# ============================================================================
+# Page Configuration
+# ============================================================================
 st.set_page_config(
     page_title="Battery Health Monitor",
-    page_icon="",
+    page_icon="battery",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
-# ================================== 语言字典 ==================================
+# ============================================================================
+# Path Configuration (GitHub Repository Structure)
+# ============================================================================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__)) if '__file__' in dir() else os.getcwd()
+DATA_DIR = os.path.join(BASE_DIR, 'data')
+MODELS_DIR = os.path.join(BASE_DIR, 'saved_models')
+
+os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(MODELS_DIR, exist_ok=True)
+
+# ============================================================================
+# Color Palette (Low Saturation Blue Theme)
+# ============================================================================
+COLORS = {
+    'primary': '#5B7C99',
+    'primary_light': '#7A9BB8',
+    'primary_dark': '#3D5A73',
+    'secondary': '#6B8E7D',
+    'warning': '#C9A66B',
+    'danger': '#B87070',
+    'text': '#2C3E50',
+    'text_secondary': '#5D6D7E',
+    'text_muted': '#7F8C9A',
+    'border': '#D5DCE3',
+    'bg': '#F5F7F9',
+    'bg_card': '#FFFFFF'
+}
+
+# ============================================================================
+# Language Dictionary
+# ============================================================================
 LANG = {
     "en": {
         "title": "Battery Health Monitoring System",
         "subtitle": "CBAM-CNN-Transformer with SHAP Interpretability",
-        "mode_select": "Select Mode",
-        "train_mode": "Train New Model",
-        "predict_mode": "Load Model & Predict",
+        "nav_demo": "Demo",
+        "nav_train": "Train",
+        "nav_predict": "Predict",
+        "nav_about": "About",
+        "demo_title": "Live Demonstration",
+        "demo_desc": "Pre-loaded battery degradation data with trained model",
         "train_title": "Model Training",
-        "upload_train": "Upload Training Files (CSV)",
-        "upload_test": "Upload Test File (CSV)",
-        "upload_model": "Upload Trained Model (.pth)",
-        "select_model": "Select Saved Model",
+        "predict_title": "SOH Prediction",
+        "upload_train": "Training Data (CSV)",
+        "upload_test": "Test Data (CSV)",
+        "upload_model": "Model File (.pth)",
+        "select_model": "Select Model",
+        "select_data": "Select Data",
         "target_col": "Target Column",
         "rated_capacity": "Rated Capacity (Ah)",
-        "rated_capacity_help": "Battery nominal capacity for SOH calculation: SOH = capacity / rated_capacity",
         "seq_length": "Sequence Length",
-        "epochs": "Training Epochs",
+        "epochs": "Epochs",
         "batch_size": "Batch Size",
         "learning_rate": "Learning Rate",
         "start_training": "Start Training",
         "start_predict": "Start Prediction",
-        "training_complete": "Training Complete!",
-        "prediction_complete": "Prediction Complete!",
-        "results_title": "Prediction Results",
-        "shap_title": "SHAP Interpretability Analysis",
+        "training_complete": "Training Complete",
+        "prediction_complete": "Prediction Complete",
+        "shap_title": "SHAP Analysis",
         "current_soh": "Current SOH",
         "select_cycle": "Select Cycle",
-        "cycle_soh": "Cycle SOH",
-        "waterfall_title": "SHAP Waterfall Analysis",
         "feature_importance": "Feature Importance",
-        "prediction_trend": "Prediction vs Actual",
+        "prediction_trend": "Prediction Trend",
         "mechanism_analysis": "Degradation Mechanism",
         "download_results": "Download Results",
-        "download_model": "Download Model",
         "mae": "MAE",
         "rmse": "RMSE",
-        "r2": "R2 Score",
-        "mape": "MAPE",
-        "samples": "Samples",
-        "language": "Language",
-        "settings": "Settings",
-        "model_info": "Model Info",
-        "files_uploaded": "files uploaded",
-        "total_samples": "Total samples",
-        "features_detected": "Features detected",
+        "r2": "R2",
         "model_name": "Model Name",
-        "use_demo": "Use Demo Data",
-        "demo_desc": "Load example data for demonstration",
-        "health_status": "Health Status",
         "excellent": "Excellent",
-        "good": "Good", 
+        "good": "Good",
         "moderate": "Moderate",
         "poor": "Poor",
-        "no_model": "No saved models found",
-        "interface_polar": "Interface Polarization",
-        "active_material": "Active Material Loss",
-        "transport_limit": "Transport Limitation",
-        "complex_degrad": "Complex Degradation",
-        "beeswarm_title": "SHAP Beeswarm Plot",
-        "heatmap_title": "SHAP Heatmap",
-        "radar_title": "Mechanism Radar",
-        "about": "About",
-        "about_text": "This system integrates CBAM-CNN-Transformer model with SHAP analysis for interpretable battery SOH prediction.",
-        "epoch": "Epoch",
-        "loss": "Loss",
-        "train_loss": "Train Loss",
-        "val_loss": "Val Loss",
-        "processing": "Processing..."
+        "no_model": "No models found in saved_models/",
+        "no_data": "No data found in data/",
+        "load_from_repo": "From Repository",
+        "upload_custom": "Upload File",
+        "data_source": "Data Source",
+        "model_source": "Model Source",
+        "processing": "Processing...",
+        "about_title": "About",
+        "about_text": "Battery SOH prediction system using CBAM-CNN-Transformer with SHAP interpretability.",
+        "config": "Configuration",
+        "using_repo": "Using repository data and model",
+        "using_demo": "Using generated demo data"
     },
     "zh": {
         "title": "电池健康监测系统",
         "subtitle": "基于CBAM-CNN-Transformer的可解释性SOH预测",
-        "mode_select": "选择模式",
-        "train_mode": "训练新模型",
-        "predict_mode": "加载模型预测",
+        "nav_demo": "演示",
+        "nav_train": "训练",
+        "nav_predict": "预测",
+        "nav_about": "关于",
+        "demo_title": "实时演示",
+        "demo_desc": "预加载的电池退化数据与训练模型",
         "train_title": "模型训练",
-        "upload_train": "上传训练文件 (CSV)",
-        "upload_test": "上传测试文件 (CSV)",
-        "upload_model": "上传训练好的模型 (.pth)",
-        "select_model": "选择已保存的模型",
-        "target_col": "目标列名",
+        "predict_title": "SOH预测",
+        "upload_train": "训练数据 (CSV)",
+        "upload_test": "测试数据 (CSV)",
+        "upload_model": "模型文件 (.pth)",
+        "select_model": "选择模型",
+        "select_data": "选择数据",
+        "target_col": "目标列",
         "rated_capacity": "额定容量 (Ah)",
-        "rated_capacity_help": "电池额定容量，用于SOH计算：SOH = 实际容量 / 额定容量",
         "seq_length": "序列长度",
         "epochs": "训练轮数",
         "batch_size": "批次大小",
         "learning_rate": "学习率",
         "start_training": "开始训练",
         "start_predict": "开始预测",
-        "training_complete": "训练完成！",
-        "prediction_complete": "预测完成！",
-        "results_title": "预测结果",
-        "shap_title": "SHAP可解释性分析",
+        "training_complete": "训练完成",
+        "prediction_complete": "预测完成",
+        "shap_title": "SHAP分析",
         "current_soh": "当前SOH",
         "select_cycle": "选择循环",
-        "cycle_soh": "循环SOH",
-        "waterfall_title": "SHAP瀑布图分析",
         "feature_importance": "特征重要性",
-        "prediction_trend": "预测值 vs 实际值",
-        "mechanism_analysis": "退化机理分析",
+        "prediction_trend": "预测趋势",
+        "mechanism_analysis": "退化机理",
         "download_results": "下载结果",
-        "download_model": "下载模型",
-        "mae": "平均绝对误差",
-        "rmse": "均方根误差",
-        "r2": "决定系数",
-        "mape": "平均百分比误差",
-        "samples": "样本数",
-        "language": "语言",
-        "settings": "设置",
-        "model_info": "模型信息",
-        "files_uploaded": "个文件已上传",
-        "total_samples": "总样本数",
-        "features_detected": "检测到的特征",
+        "mae": "MAE",
+        "rmse": "RMSE",
+        "r2": "R2",
         "model_name": "模型名称",
-        "use_demo": "使用演示数据",
-        "demo_desc": "加载示例数据进行演示",
-        "health_status": "健康状态",
         "excellent": "优秀",
         "good": "良好",
         "moderate": "中等",
         "poor": "较差",
-        "no_model": "未找到已保存的模型",
-        "interface_polar": "界面极化增长",
-        "active_material": "活性材料损失",
-        "transport_limit": "传输限制增强",
-        "complex_degrad": "复合退化效应",
-        "beeswarm_title": "SHAP蜂群图",
-        "heatmap_title": "SHAP热力图",
-        "radar_title": "机理雷达图",
-        "about": "关于",
-        "about_text": "本系统集成了CBAM-CNN-Transformer模型和SHAP分析，用于可解释的电池SOH预测。",
-        "epoch": "轮次",
-        "loss": "损失",
-        "train_loss": "训练损失",
-        "val_loss": "验证损失",
-        "processing": "处理中..."
+        "no_model": "saved_models/ 中未找到模型",
+        "no_data": "data/ 中未找到数据",
+        "load_from_repo": "从仓库加载",
+        "upload_custom": "上传文件",
+        "data_source": "数据来源",
+        "model_source": "模型来源",
+        "processing": "处理中...",
+        "about_title": "关于",
+        "about_text": "使用CBAM-CNN-Transformer和SHAP可解释性的电池SOH预测系统。",
+        "config": "配置",
+        "using_repo": "使用仓库中的数据和模型",
+        "using_demo": "使用生成的演示数据"
     }
 }
 
-# ================================== CSS样式 ==================================
+
+# ============================================================================
+# CSS Styles
+# ============================================================================
 def load_css():
     st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=SF+Pro+Display:wght@300;400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
     
-    * {
-        font-family: 'Arial', -apple-system, BlinkMacSystemFont, sans-serif;
+    :root {
+        --primary: #5B7C99;
+        --primary-light: #7A9BB8;
+        --primary-dark: #3D5A73;
+        --secondary: #6B8E7D;
+        --warning: #C9A66B;
+        --danger: #B87070;
+        --bg: #F5F7F9;
+        --bg-card: #FFFFFF;
+        --text: #2C3E50;
+        --text-secondary: #5D6D7E;
+        --text-muted: #7F8C9A;
+        --border: #D5DCE3;
     }
     
-    .main { background-color: #ffffff; }
-    .stApp { background: #ffffff; }
+    * { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+    .main { background-color: var(--bg); }
+    .stApp { background: var(--bg); }
     
-    .main-header {
-        text-align: center;
-        padding: 1.5rem 0;
-        background: #ffffff;
-        border-bottom: 1px solid #e5e5e5;
-        margin-bottom: 1.5rem;
+    #MainMenu, footer, header, .stDeployButton { display: none !important; }
+    
+    .nav-bar {
+        background: linear-gradient(135deg, #2C3E50 0%, #34495E 100%);
+        padding: 1rem 2rem;
+        margin: -1rem -1rem 1.5rem -1rem;
+        border-radius: 0 0 12px 12px;
     }
     
-    .main-title {
-        font-size: 2rem;
+    .nav-title {
+        color: #FFFFFF;
+        font-size: 1.25rem;
         font-weight: 600;
-        color: #1d1d1f;
-        margin-bottom: 0.3rem;
+        margin: 0;
     }
     
-    .main-subtitle {
-        font-size: 1rem;
-        color: #6e6e73;
-        font-weight: 400;
+    .nav-subtitle {
+        color: rgba(255,255,255,0.65);
+        font-size: 0.8rem;
+        margin: 0;
     }
-    
-    .metric-card {
-        background: #f5f5f7;
-        border-radius: 12px;
-        padding: 1.2rem;
-        text-align: center;
-        border: 1px solid #e5e5e5;
-    }
-    
-    .metric-card:hover {
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-    }
-    
-    .soh-display {
-        background: linear-gradient(135deg, #007aff 0%, #5856d6 100%);
-        border-radius: 16px;
-        padding: 2rem 1.5rem;
-        text-align: center;
-        color: white;
-        box-shadow: 0 4px 20px rgba(0, 122, 255, 0.25);
-    }
-    
-    .soh-value {
-        font-size: 3.5rem;
-        font-weight: 700;
-        line-height: 1;
-        margin-bottom: 0.3rem;
-    }
-    
-    .soh-label {
-        font-size: 1rem;
-        opacity: 0.9;
-        font-weight: 500;
-    }
-    
-    .status-badge {
-        display: inline-block;
-        padding: 0.4rem 1rem;
-        border-radius: 12px;
-        font-weight: 600;
-        font-size: 0.85rem;
-        margin-top: 0.6rem;
-    }
-    
-    .status-excellent { background: rgba(52, 199, 89, 0.2); color: #34c759; }
-    .status-good { background: rgba(0, 122, 255, 0.2); color: #007aff; }
-    .status-moderate { background: rgba(255, 159, 10, 0.2); color: #ff9f0a; }
-    .status-poor { background: rgba(255, 59, 48, 0.2); color: #ff3b30; }
     
     .section-header {
         font-size: 1.2rem;
         font-weight: 600;
-        color: #1d1d1f;
+        color: var(--text);
+        padding-bottom: 0.75rem;
+        border-bottom: 2px solid var(--primary);
         margin: 1.5rem 0 1rem 0;
-        padding-bottom: 0.4rem;
-        border-bottom: 2px solid #007aff;
     }
     
-    .info-box {
-        background: #f5f5f7;
-        border-radius: 8px;
-        padding: 0.8rem 1rem;
-        margin: 0.5rem 0;
-        border-left: 3px solid #007aff;
-        color: #1d1d1f;
+    .card {
+        background: var(--bg-card);
+        border-radius: 10px;
+        padding: 1.5rem;
+        border: 1px solid var(--border);
+        box-shadow: 0 2px 8px rgba(45,62,80,0.08);
+        margin-bottom: 1rem;
+    }
+    
+    .soh-display {
+        background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+        border-radius: 12px;
+        padding: 2rem;
+        text-align: center;
+        color: white;
+    }
+    
+    .soh-value {
+        font-size: 3.2rem;
+        font-weight: 700;
+        font-family: 'JetBrains Mono', monospace;
+        line-height: 1;
+    }
+    
+    .soh-label {
+        font-size: 0.9rem;
+        opacity: 0.9;
+        margin-top: 0.5rem;
+    }
+    
+    .status-badge {
+        display: inline-block;
+        padding: 0.35rem 0.9rem;
+        border-radius: 14px;
+        font-weight: 600;
+        font-size: 0.75rem;
+        margin-top: 0.75rem;
+    }
+    
+    .status-excellent { background: rgba(107,142,125,0.2); color: #6B8E7D; }
+    .status-good { background: rgba(91,124,153,0.2); color: #5B7C99; }
+    .status-moderate { background: rgba(201,166,107,0.2); color: #C9A66B; }
+    .status-poor { background: rgba(184,112,112,0.2); color: #B87070; }
+    
+    .metric-card {
+        background: var(--bg-card);
+        border-radius: 10px;
+        padding: 1.2rem;
+        text-align: center;
+        border: 1px solid var(--border);
     }
     
     .metric-value {
         font-size: 1.5rem;
-        font-weight: 600;
-        color: #1d1d1f;
+        font-weight: 700;
+        color: var(--primary);
+        font-family: 'JetBrains Mono', monospace;
     }
     
     .metric-label {
-        font-size: 0.8rem;
-        color: #6e6e73;
-        margin-top: 0.2rem;
+        font-size: 0.7rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-top: 0.25rem;
     }
     
-    .mechanism-card {
-        background: #f5f5f7;
+    .mechanism-item {
+        background: var(--bg-card);
         border-radius: 8px;
-        padding: 0.6rem 0.8rem;
-        margin: 0.3rem 0;
-        border: 1px solid #e5e5e5;
+        padding: 0.75rem 1rem;
+        margin: 0.5rem 0;
+        border: 1px solid var(--border);
     }
     
     .mechanism-bar {
         height: 6px;
         border-radius: 3px;
-        background: #e5e5e5;
+        background: var(--border);
+        margin-top: 0.5rem;
         overflow: hidden;
-        margin-top: 0.3rem;
     }
     
     .mechanism-fill {
         height: 100%;
+        background: linear-gradient(90deg, var(--primary-light), var(--primary));
         border-radius: 3px;
-        background: linear-gradient(90deg, #007aff, #5856d6);
     }
     
     .stButton > button {
-        background: #007aff;
+        background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
         color: white;
         border: none;
         border-radius: 8px;
-        padding: 0.6rem 1.5rem;
+        padding: 0.6rem 1.2rem;
         font-weight: 600;
-        font-size: 0.95rem;
         width: 100%;
     }
     
     .stButton > button:hover {
-        background: #0056b3;
+        box-shadow: 0 4px 12px rgba(91,124,153,0.3);
     }
     
-    .cycle-selector {
-        background: #f5f5f7;
-        border-radius: 8px;
-        padding: 1rem;
-        border: 1px solid #e5e5e5;
+    .info-banner {
+        background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+        border-radius: 10px;
+        padding: 1.25rem 1.5rem;
+        color: white;
+        margin-bottom: 1.5rem;
     }
     
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    
-    .stProgress > div > div > div {
-        background: linear-gradient(90deg, #007aff, #5856d6);
-    }
-    
-    /* 确保所有文本为黑色 */
-    p, span, label, .stMarkdown {
-        color: #1d1d1f !important;
-    }
-    
-    h1, h2, h3, h4, h5, h6 {
-        color: #1d1d1f !important;
-    }
+    .info-banner h3 { margin: 0 0 0.25rem 0; font-size: 1.15rem; }
+    .info-banner p { margin: 0; opacity: 0.85; font-size: 0.85rem; }
     </style>
     """, unsafe_allow_html=True)
 
 
-# ================================== 模型定义 ==================================
+# ============================================================================
+# Model Architecture
+# ============================================================================
 class ChannelAttention(nn.Module):
-    def __init__(self, in_channels, reduction=16):
-        super(ChannelAttention, self).__init__()
+    def __init__(self, channels, reduction=16):
+        super().__init__()
         self.avg_pool = nn.AdaptiveAvgPool1d(1)
         self.max_pool = nn.AdaptiveMaxPool1d(1)
+        reduced = max(channels // reduction, 8)
         self.mlp = nn.Sequential(
-            nn.Linear(in_channels, max(in_channels // reduction, 8), bias=False),
+            nn.Linear(channels, reduced, bias=False),
             nn.ReLU(inplace=True),
-            nn.Linear(max(in_channels // reduction, 8), in_channels, bias=False)
+            nn.Linear(reduced, channels, bias=False)
         )
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
-        batch_size, channels, length = x.size()
-        avg_out = self.avg_pool(x).view(batch_size, channels)
-        avg_out = self.mlp(avg_out)
-        max_out = self.max_pool(x).view(batch_size, channels)
-        max_out = self.mlp(max_out)
-        channel_attention = self.sigmoid(avg_out + max_out)
-        channel_attention = channel_attention.view(batch_size, channels, 1)
-        return x * channel_attention.expand_as(x)
+        b, c, _ = x.size()
+        avg_out = self.mlp(self.avg_pool(x).view(b, c))
+        max_out = self.mlp(self.max_pool(x).view(b, c))
+        attn = self.sigmoid(avg_out + max_out).view(b, c, 1)
+        return x * attn
 
 
 class SpatialAttention(nn.Module):
     def __init__(self, kernel_size=7):
-        super(SpatialAttention, self).__init__()
-        self.conv = nn.Conv1d(2, 1, kernel_size=kernel_size, padding=kernel_size // 2, bias=False)
+        super().__init__()
+        self.conv = nn.Conv1d(2, 1, kernel_size, padding=kernel_size//2, bias=False)
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
-        avg_out = torch.mean(x, dim=1, keepdim=True)
-        max_out, _ = torch.max(x, dim=1, keepdim=True)
-        concat = torch.cat([avg_out, max_out], dim=1)
-        spatial_attention = self.sigmoid(self.conv(concat))
-        return x * spatial_attention.expand_as(x)
+        avg_out = x.mean(dim=1, keepdim=True)
+        max_out = x.max(dim=1, keepdim=True)[0]
+        attn = self.sigmoid(self.conv(torch.cat([avg_out, max_out], dim=1)))
+        return x * attn
 
 
 class CBAMBlock(nn.Module):
-    def __init__(self, in_channels, reduction=16, kernel_size=7):
-        super(CBAMBlock, self).__init__()
-        self.channel_attention = ChannelAttention(in_channels, reduction)
-        self.spatial_attention = SpatialAttention(kernel_size)
+    def __init__(self, channels, reduction=16, kernel_size=7):
+        super().__init__()
+        self.ca = ChannelAttention(channels, reduction)
+        self.sa = SpatialAttention(kernel_size)
 
     def forward(self, x):
-        x = self.channel_attention(x)
-        x = self.spatial_attention(x)
-        return x
+        return self.sa(self.ca(x))
 
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, embed_dim, max_len=5000):
-        super(PositionalEncoding, self).__init__()
-        pe = torch.zeros(max_len, embed_dim)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, embed_dim, 2).float() * (-np.log(10000.0) / embed_dim))
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0)
-        self.register_buffer('pe', pe)
+    def __init__(self, d_model, max_len=5000):
+        super().__init__()
+        pe = torch.zeros(max_len, d_model)
+        pos = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div = torch.exp(torch.arange(0, d_model, 2).float() * (-np.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(pos * div)
+        pe[:, 1::2] = torch.cos(pos * div)
+        self.register_buffer('pe', pe.unsqueeze(0))
 
     def forward(self, x):
         return x + self.pe[:, :x.size(1), :]
@@ -420,42 +415,34 @@ class PositionalEncoding(nn.Module):
 
 class CBAMCNNTransformer(nn.Module):
     def __init__(self, input_dim, embed_dim=128, num_heads=4, num_layers=3, dropout=0.2):
-        super(CBAMCNNTransformer, self).__init__()
-        self.input_dim = input_dim
-        self.embed_dim = embed_dim
-
-        self.cnn_block1 = nn.Sequential(
-            nn.Conv1d(in_channels=input_dim, out_channels=embed_dim // 2, kernel_size=3, padding=1),
-            nn.BatchNorm1d(embed_dim // 2),
+        super().__init__()
+        self.cnn1 = nn.Sequential(
+            nn.Conv1d(input_dim, embed_dim//2, 3, padding=1),
+            nn.BatchNorm1d(embed_dim//2),
             nn.ReLU(),
-            nn.MaxPool1d(kernel_size=2)
+            nn.MaxPool1d(2)
         )
-        self.cbam1 = CBAMBlock(embed_dim // 2, reduction=8, kernel_size=7)
-
-        self.cnn_block2 = nn.Sequential(
-            nn.Conv1d(in_channels=embed_dim // 2, out_channels=embed_dim, kernel_size=3, padding=1),
+        self.cbam1 = CBAMBlock(embed_dim//2, 8, 7)
+        
+        self.cnn2 = nn.Sequential(
+            nn.Conv1d(embed_dim//2, embed_dim, 3, padding=1),
             nn.BatchNorm1d(embed_dim),
             nn.ReLU(),
-            nn.MaxPool1d(kernel_size=2)
+            nn.MaxPool1d(2)
         )
-        self.cbam2 = CBAMBlock(embed_dim, reduction=16, kernel_size=5)
-
-        self.positional_encoding = PositionalEncoding(embed_dim)
-
+        self.cbam2 = CBAMBlock(embed_dim, 16, 5)
+        
+        self.pos_enc = PositionalEncoding(embed_dim)
         encoder_layer = nn.TransformerEncoderLayer(
-            d_model=embed_dim,
-            nhead=num_heads,
-            dropout=dropout,
-            dim_feedforward=embed_dim * 2,
-            activation='gelu',
-            batch_first=True
+            d_model=embed_dim, nhead=num_heads, dropout=dropout,
+            dim_feedforward=embed_dim*2, activation='gelu', batch_first=True
         )
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-
-        self.attention_pool = nn.MultiheadAttention(embed_dim, num_heads=2, dropout=dropout, batch_first=True)
-        self.pool_query = nn.Parameter(torch.randn(1, 1, embed_dim) * 0.02)
-
-        self.fc_out = nn.Sequential(
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers)
+        
+        self.attn_pool = nn.MultiheadAttention(embed_dim, 2, dropout=dropout, batch_first=True)
+        self.query = nn.Parameter(torch.randn(1, 1, embed_dim) * 0.02)
+        
+        self.fc = nn.Sequential(
             nn.Linear(embed_dim, 64),
             nn.LayerNorm(64),
             nn.ReLU(),
@@ -470,32 +457,26 @@ class CBAMCNNTransformer(nn.Module):
             if isinstance(m, nn.Linear):
                 nn.init.xavier_uniform_(m.weight)
                 if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
+                    nn.init.zeros_(m.bias)
             elif isinstance(m, nn.Conv1d):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-            elif isinstance(m, (nn.BatchNorm1d, nn.LayerNorm)):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
 
     def forward(self, x):
-        batch_size, seq_len, input_dim = x.size()
+        b = x.size(0)
         x = x.permute(0, 2, 1)
-        x = self.cnn_block1(x)
-        x = self.cbam1(x)
-        x = self.cnn_block2(x)
-        x = self.cbam2(x)
+        x = self.cbam1(self.cnn1(x))
+        x = self.cbam2(self.cnn2(x))
         x = x.permute(0, 2, 1)
-        x = self.positional_encoding(x)
-        x = self.dropout(x)
-        x = self.transformer_encoder(x)
-        query = self.pool_query.expand(batch_size, -1, -1)
-        pooled_features, _ = self.attention_pool(query, x, x)
-        pooled_features = pooled_features.squeeze(1)
-        out = self.fc_out(pooled_features)
-        return out.squeeze(1)
+        x = self.dropout(self.pos_enc(x))
+        x = self.transformer(x)
+        q = self.query.expand(b, -1, -1)
+        pooled, _ = self.attn_pool(q, x, x)
+        return self.fc(pooled.squeeze(1)).squeeze(1)
 
 
-# ================================== 数据集类 ==================================
+# ============================================================================
+# Dataset
+# ============================================================================
 class BatteryDataset(Dataset):
     def __init__(self, features, labels, seq_length=12):
         self.seq_length = seq_length
@@ -503,7 +484,7 @@ class BatteryDataset(Dataset):
             self.feature_names = features.columns.tolist()
             self.features = torch.tensor(features.values, dtype=torch.float32)
         else:
-            self.feature_names = [f'feature_{i}' for i in range(features.shape[1])]
+            self.feature_names = [f'f{i}' for i in range(features.shape[1])]
             self.features = torch.tensor(features, dtype=torch.float32)
         
         if isinstance(labels, pd.Series):
@@ -515,58 +496,38 @@ class BatteryDataset(Dataset):
         return max(0, len(self.features) - self.seq_length + 1)
 
     def __getitem__(self, idx):
-        seq_X = self.features[idx:idx + self.seq_length]
-        label = self.labels[idx + self.seq_length - 1]
-        return seq_X, label
+        return self.features[idx:idx+self.seq_length], self.labels[idx+self.seq_length-1]
 
 
-# ================================== 辅助函数 ==================================
-def get_text(key, lang):
-    return LANG.get(lang, LANG["en"]).get(key, key)
+# ============================================================================
+# File Utilities
+# ============================================================================
+def get_data_files():
+    files = []
+    if os.path.exists(DATA_DIR):
+        for ext in ['*.csv', '*.CSV']:
+            files.extend(glob.glob(os.path.join(DATA_DIR, ext)))
+            files.extend(glob.glob(os.path.join(DATA_DIR, '**', ext), recursive=True))
+    return sorted(set(files))
 
 
-def get_health_status(soh, lang):
-    if soh >= 90:
-        return get_text("excellent", lang), "status-excellent"
-    elif soh >= 80:
-        return get_text("good", lang), "status-good"
-    elif soh >= 70:
-        return get_text("moderate", lang), "status-moderate"
-    else:
-        return get_text("poor", lang), "status-poor"
+def get_model_files():
+    if os.path.exists(MODELS_DIR):
+        return sorted(glob.glob(os.path.join(MODELS_DIR, '*.pth')))
+    return []
 
 
-def get_device():
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-
-def get_models_dir():
-    models_dir = "saved_models"
-    os.makedirs(models_dir, exist_ok=True)
-    return models_dir
-
-
-def get_saved_models():
-    models_dir = get_models_dir()
-    models = []
-    if os.path.exists(models_dir):
-        for f in os.listdir(models_dir):
-            if f.endswith('.pth'):
-                models.append(f)
-    return sorted(models, reverse=True)
-
-
-def read_csv_file(file):
-    """读取CSV文件，支持多种编码和分隔符"""
-    file.seek(0)
+def read_csv(file_or_path):
     encodings = ['utf-8', 'gbk', 'gb2312', 'utf-8-sig', 'latin1']
-    separators = [',', '\t', ';']
-    
-    for encoding in encodings:
-        for sep in separators:
+    seps = [',', '\t', ';']
+    for enc in encodings:
+        for sep in seps:
             try:
-                file.seek(0)
-                df = pd.read_csv(file, encoding=encoding, sep=sep)
+                if isinstance(file_or_path, str):
+                    df = pd.read_csv(file_or_path, encoding=enc, sep=sep)
+                else:
+                    file_or_path.seek(0)
+                    df = pd.read_csv(file_or_path, encoding=enc, sep=sep)
                 if len(df.columns) >= 2:
                     return df
             except:
@@ -574,72 +535,371 @@ def read_csv_file(file):
     return None
 
 
-def load_and_preprocess_data(files, target_col, rated_capacity=2.0):
-    """加载和预处理数据"""
-    all_data = []
-    
-    for file in files:
-        df = read_csv_file(file)
-        if df is not None:
-            all_data.append(df)
-    
-    if not all_data:
-        raise ValueError("No valid data files found")
-    
-    combined_data = pd.concat(all_data, ignore_index=True)
-    
-    # 检查目标列
-    if target_col not in combined_data.columns:
-        available_cols = ', '.join(combined_data.columns.tolist())
-        raise KeyError(f"Target column '{target_col}' not found. Available: {available_cols}")
-    
-    # 计算SOH = 实际容量 / 额定容量
-    combined_data['SOH'] = combined_data[target_col] / rated_capacity
-    
-    # 删除不需要的列
-    features_to_drop = ['voltage mean', 'voltage std', 'current mean', 'current std']
-    available_drops = [f for f in features_to_drop if f in combined_data.columns]
-    if available_drops:
-        combined_data = combined_data.drop(available_drops, axis=1)
-    
-    # 分离特征和标签
-    features = combined_data.drop([target_col, 'SOH'], axis=1)
-    labels = combined_data['SOH']
-    
-    # 处理无效值
-    features = features.replace([np.inf, -np.inf], np.nan).fillna(0)
-    labels = labels.replace([np.inf, -np.inf], np.nan).fillna(0)
-    
-    return features, labels
+def load_model_file(path, device):
+    ckpt = torch.load(path, map_location=device, weights_only=False)
+    cfg = ckpt.get('config', {})
+    model = CBAMCNNTransformer(
+        input_dim=ckpt['input_dim'],
+        embed_dim=128,
+        num_heads=cfg.get('num_heads', 8),
+        num_layers=cfg.get('num_layers', 4),
+        dropout=cfg.get('dropout', 0.3)
+    ).to(device)
+    model.load_state_dict(ckpt['model_state_dict'])
+    return model, ckpt
 
 
-def train_model_func(train_features, train_labels, config, progress_callback=None):
-    """训练模型"""
+# ============================================================================
+# Demo Data Generator
+# ============================================================================
+def generate_demo_data():
+    np.random.seed(42)
+    n = 200
+    cycles = np.arange(1, n + 1)
+    
+    soh = 100 - 0.05*cycles - 0.0001*cycles**1.5 + np.random.normal(0, 0.3, n)
+    soh = np.clip(soh, 70, 100)
+    
+    features = {
+        'CC_time': 3600*(1 - 0.002*cycles) + np.random.normal(0, 30, n),
+        'CV_time': 600 + 5*cycles + np.random.normal(0, 20, n),
+        'CC_capacity': 1.6*soh/100 + np.random.normal(0, 0.02, n),
+        'CV_capacity': 0.4*soh/100 + np.random.normal(0, 0.01, n),
+        'CC_slope_1': -0.001 - 0.00001*cycles + np.random.normal(0, 0.0001, n),
+        'CC_slope_2': -0.002 - 0.00002*cycles + np.random.normal(0, 0.0001, n),
+        'CV_slope_1': -0.01 - 0.0001*cycles + np.random.normal(0, 0.001, n),
+        'CV_slope_2': -0.005 - 0.00005*cycles + np.random.normal(0, 0.0005, n),
+        'temperature_avg': 25 + 0.01*cycles + np.random.normal(0, 1, n),
+        'temperature_max': 35 + 0.015*cycles + np.random.normal(0, 1.5, n),
+        'voltage_end': 4.2 - 0.0005*cycles + np.random.normal(0, 0.01, n),
+        'current_avg': 1.0 + np.random.normal(0, 0.05, n),
+        'resistance_est': 0.05 + 0.0002*cycles + np.random.normal(0, 0.002, n),
+        'energy_efficiency': 0.98 - 0.0003*cycles + np.random.normal(0, 0.005, n),
+    }
+    
+    df = pd.DataFrame(features)
+    df['capacity'] = soh/100 * 2.0
+    df['SOH'] = soh
+    
+    return df, list(features.keys())
+
+
+def generate_demo_results():
+    np.random.seed(42)
+    df, feature_names = generate_demo_data()
+    
+    actuals = df['SOH'].values[11:]
+    predictions = actuals + np.random.normal(0, 0.3, len(actuals))
+    predictions = np.clip(predictions, 70, 100)
+    
+    importance = np.array([0.95, 0.88, 0.82, 0.75, 0.68, 0.62, 0.55, 0.48,
+                          0.35, 0.40, 0.45, 0.30, 0.72, 0.52])
+    importance = importance / importance.max()
+    
+    shap_vals = np.zeros((len(predictions), len(feature_names)))
+    for i in range(len(predictions)):
+        shap_vals[i] = importance * np.random.randn(len(feature_names)) * 0.1 * (1 + i/len(predictions)*0.05)
+    
+    return {
+        'predictions': predictions,
+        'actuals': actuals,
+        'feature_importance': importance,
+        'shap_values': shap_vals,
+        'feature_names': feature_names,
+        'features_scaled': np.random.randn(len(predictions), len(feature_names)),
+        'df': df,
+        'source': 'demo'
+    }
+
+
+# ============================================================================
+# Helper Functions
+# ============================================================================
+def T(key, lang):
+    return LANG.get(lang, LANG['en']).get(key, key)
+
+
+def get_status(soh, lang):
+    if soh >= 90:
+        return T('excellent', lang), 'status-excellent'
+    elif soh >= 80:
+        return T('good', lang), 'status-good'
+    elif soh >= 70:
+        return T('moderate', lang), 'status-moderate'
+    return T('poor', lang), 'status-poor'
+
+
+def get_device():
+    return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
+def setup_plot():
+    plt.style.use('seaborn-v0_8-whitegrid')
+    matplotlib.rcParams.update({
+        'font.family': 'Arial',
+        'font.sans-serif': ['Arial', 'DejaVu Sans', 'Helvetica'],
+        'axes.unicode_minus': False,
+        'figure.facecolor': '#FFFFFF',
+        'axes.facecolor': '#F5F7F9',
+        'axes.edgecolor': '#D5DCE3',
+        'axes.labelcolor': '#2C3E50',
+        'xtick.color': '#2C3E50',
+        'ytick.color': '#2C3E50',
+        'text.color': '#2C3E50',
+        'grid.color': '#D5DCE3',
+        'grid.alpha': 0.5,
+        'font.size': 10,
+        'axes.titlesize': 12,
+        'axes.labelsize': 11,
+    })
+
+
+# ============================================================================
+# Plotting Functions
+# ============================================================================
+def plot_feature_importance(names, values):
+    setup_plot()
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    idx = np.argsort(values)
+    n = len(idx)
+    colors = [plt.cm.Blues(0.3 + 0.5*i/n) for i in range(n)]
+    
+    bars = ax.barh(range(n), values[idx], color=colors, edgecolor=COLORS['primary'], linewidth=0.5)
+    
+    for i, (bar, val) in enumerate(zip(bars, values[idx])):
+        ax.text(val + 0.02, i, f'{val:.3f}', va='center', fontsize=10, 
+                color=COLORS['text'], fontweight='600')
+    
+    ax.set_yticks(range(n))
+    ax.set_yticklabels([names[i] for i in idx], fontsize=10, fontweight='500')
+    ax.set_xlabel('Normalized Importance', fontweight='600')
+    ax.set_title('Feature Importance', fontweight='700', pad=12)
+    ax.set_xlim(0, 1.15)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    
+    plt.tight_layout()
+    return fig
+
+
+def plot_prediction_trend(actual, predicted, selected=None):
+    setup_plot()
+    fig, ax = plt.subplots(figsize=(12, 5))
+    
+    x = range(len(actual))
+    ax.plot(x, actual, color=COLORS['primary'], lw=2, label='Actual SOH', marker='o', ms=2, alpha=0.8)
+    ax.plot(x, predicted, color=COLORS['warning'], lw=2, label='Predicted SOH', ls='--', alpha=0.8)
+    ax.fill_between(x, actual, predicted, alpha=0.1, color=COLORS['primary'])
+    
+    if selected is not None and selected < len(actual):
+        ax.axvline(selected, color=COLORS['danger'], ls=':', lw=2, alpha=0.8)
+        ax.scatter([selected], [actual[selected]], color=COLORS['danger'], s=120, zorder=5, 
+                   edgecolors='white', lw=2)
+        ax.scatter([selected], [predicted[selected]], color=COLORS['danger'], s=120, zorder=5,
+                   marker='s', edgecolors='white', lw=2)
+    
+    ax.set_xlabel('Cycle', fontweight='600')
+    ax.set_ylabel('SOH (%)', fontweight='600')
+    ax.set_title('Prediction vs Actual SOH', fontweight='700', pad=12)
+    ax.legend(loc='upper right')
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    
+    plt.tight_layout()
+    return fig
+
+
+def plot_waterfall(names, shap_vals, base_val, suffix=""):
+    setup_plot()
+    fig, ax = plt.subplots(figsize=(14, 6))
+    
+    top_idx = np.argsort(np.abs(shap_vals))[::-1][:10]
+    
+    heights = [base_val]
+    colors = [COLORS['primary']]
+    labels = ['Base']
+    
+    for i in top_idx:
+        val = shap_vals[i]
+        heights.append(abs(val) * 100)
+        colors.append(COLORS['secondary'] if val > 0 else COLORS['danger'])
+        labels.append(names[i][:12] if i < len(names) else f'F{i}')
+    
+    final = base_val + shap_vals.sum()
+    heights.append(final)
+    colors.append(COLORS['primary_dark'])
+    labels.append('Final')
+    
+    pos = list(range(len(heights)))
+    bars = ax.bar(pos, heights, color=colors, alpha=0.85, width=0.65, edgecolor='white', lw=1.5)
+    
+    for i, (p, h) in enumerate(zip(pos, heights)):
+        if i == 0 or i == len(pos) - 1:
+            ax.text(p, h + 0.02, f'{h*100:.1f}%', ha='center', va='bottom', fontsize=10, fontweight='700')
+        else:
+            orig = shap_vals[top_idx[i-1]] * 100
+            ax.text(p, h + 0.005, f'{orig:+.2f}%', ha='center', va='bottom', fontsize=9, fontweight='600')
+    
+    ax.set_xticks(pos)
+    ax.set_xticklabels(labels, rotation=45, ha='right', fontsize=10, fontweight='500')
+    ax.set_ylabel('SOH Contribution', fontweight='600')
+    ax.set_title(f'SHAP Waterfall Analysis {suffix}', fontweight='700', pad=12)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    
+    plt.tight_layout()
+    return fig
+
+
+def plot_beeswarm(names, shap_vals, feat_vals):
+    setup_plot()
+    fig, ax = plt.subplots(figsize=(10, 7))
+    
+    n = len(names)
+    importance = np.abs(shap_vals).mean(axis=0)
+    top_idx = np.argsort(importance)[-min(12, n):]
+    
+    cmap = LinearSegmentedColormap.from_list('custom', 
+        [COLORS['primary_light'], '#FFFFFF', COLORS['danger']])
+    
+    for i, fi in enumerate(top_idx):
+        sv = shap_vals[:, fi]
+        
+        if feat_vals is not None and fi < feat_vals.shape[1]:
+            fv = feat_vals[:len(sv), fi]
+            if fv.max() != fv.min():
+                nv = (fv - fv.min()) / (fv.max() - fv.min())
+            else:
+                nv = np.ones_like(fv) * 0.5
+        else:
+            nv = np.random.rand(len(sv))
+        
+        jitter = np.random.normal(0, 0.08, len(sv))
+        y = np.full_like(sv, i) + jitter
+        
+        sizes = 25 + 60 * np.abs(sv) / (np.max(np.abs(sv)) + 1e-10)
+        ax.scatter(sv, y, c=cmap(nv), s=sizes, alpha=0.6, edgecolors='white', lw=0.3)
+    
+    ax.axvline(0, color=COLORS['text_muted'], ls='--', alpha=0.6, lw=1.5)
+    ax.set_yticks(range(len(top_idx)))
+    ax.set_yticklabels([names[i][:18] for i in top_idx], fontsize=10, fontweight='500')
+    ax.set_xlabel('SHAP Value', fontweight='600')
+    ax.set_title('SHAP Beeswarm Plot', fontweight='700', pad=12)
+    
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(0, 1))
+    sm.set_array([])
+    cbar = plt.colorbar(sm, ax=ax, shrink=0.8)
+    cbar.set_label('Feature Value (Normalized)', fontsize=10)
+    
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    
+    plt.tight_layout()
+    return fig
+
+
+def plot_radar(mechanisms, contributions):
+    setup_plot()
+    fig, ax = plt.subplots(figsize=(6, 6), subplot_kw=dict(projection='polar'))
+    
+    angles = np.linspace(0, 2*np.pi, len(mechanisms), endpoint=False)
+    values = np.concatenate([contributions, [contributions[0]]])
+    angles = np.concatenate([angles, [angles[0]]])
+    
+    ax.plot(angles, values, 'o-', lw=2.5, color=COLORS['primary'], ms=8,
+            markerfacecolor=COLORS['primary_dark'], markeredgecolor='white', markeredgewidth=1.5)
+    ax.fill(angles, values, alpha=0.2, color=COLORS['primary'])
+    
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(mechanisms, fontsize=9, fontweight='500')
+    ax.set_ylim(0, 1)
+    ax.set_facecolor(COLORS['bg'])
+    ax.grid(True, alpha=0.4, color=COLORS['border'])
+    
+    return fig
+
+
+def plot_training_curve(train_loss, val_loss):
+    setup_plot()
+    fig, ax = plt.subplots(figsize=(10, 5))
+    
+    epochs = range(1, len(train_loss) + 1)
+    ax.plot(epochs, train_loss, color=COLORS['primary'], lw=2, label='Train Loss', marker='o', ms=3)
+    ax.plot(epochs, val_loss, color=COLORS['warning'], lw=2, label='Val Loss', marker='s', ms=3)
+    
+    ax.set_xlabel('Epoch', fontweight='600')
+    ax.set_ylabel('Loss', fontweight='600')
+    ax.set_title('Training Progress', fontweight='700', pad=12)
+    ax.legend(loc='upper right')
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    
+    plt.tight_layout()
+    return fig
+
+
+def categorize_mechanisms(names, importance):
+    mechanisms = {
+        'Interface Polarization': [],
+        'Active Material Loss': [],
+        'Transport Limitation': [],
+        'Complex Degradation': []
+    }
+    
+    keys = list(mechanisms.keys())
+    
+    for i, name in enumerate(names):
+        low = name.lower()
+        if 'cv' in low:
+            mechanisms[keys[0]].append(i)
+        elif 'cc' in low or 'capacity' in low:
+            mechanisms[keys[1]].append(i)
+        elif 'slope' in low or 'resistance' in low:
+            mechanisms[keys[2]].append(i)
+        else:
+            mechanisms[keys[3]].append(i)
+    
+    result_names = []
+    result_contrib = []
+    
+    for name, indices in mechanisms.items():
+        if indices:
+            result_names.append(name)
+            result_contrib.append(np.mean(importance[indices]))
+    
+    contrib = np.array(result_contrib)
+    if contrib.max() > 0:
+        contrib = contrib / contrib.max()
+    
+    return result_names, contrib
+
+
+# ============================================================================
+# Training & Prediction Functions
+# ============================================================================
+def train_model(train_features, train_labels, config, progress_cb=None):
     device = get_device()
     
-    # 数据标准化
     scaler_X = StandardScaler()
     scaler_y = StandardScaler()
     
-    train_features_scaled = scaler_X.fit_transform(train_features.values)
-    train_labels_scaled = scaler_y.fit_transform(train_labels.values.reshape(-1, 1)).flatten()
+    X_scaled = scaler_X.fit_transform(train_features.values)
+    y_scaled = scaler_y.fit_transform(train_labels.values.reshape(-1, 1)).flatten()
     
-    # 创建数据集
     dataset = BatteryDataset(
-        pd.DataFrame(train_features_scaled, columns=train_features.columns),
-        pd.Series(train_labels_scaled),
+        pd.DataFrame(X_scaled, columns=train_features.columns),
+        pd.Series(y_scaled),
         seq_length=config['seq_length']
     )
     
-    # 划分训练集和验证集
     val_size = int(0.1 * len(dataset))
     train_size = len(dataset) - val_size
-    train_subset, val_subset = torch.utils.data.random_split(dataset, [train_size, val_size])
+    train_ds, val_ds = torch.utils.data.random_split(dataset, [train_size, val_size])
     
-    train_loader = DataLoader(train_subset, batch_size=config['batch_size'], shuffle=True, drop_last=True)
-    val_loader = DataLoader(val_subset, batch_size=config['batch_size'], shuffle=False)
+    train_loader = DataLoader(train_ds, batch_size=config['batch_size'], shuffle=True, drop_last=True)
+    val_loader = DataLoader(val_ds, batch_size=config['batch_size'], shuffle=False)
     
-    # 创建模型
     model = CBAMCNNTransformer(
         input_dim=train_features.shape[1],
         embed_dim=128,
@@ -652,104 +912,82 @@ def train_model_func(train_features, train_labels, config, progress_callback=Non
     optimizer = optim.AdamW(model.parameters(), lr=config['learning_rate'], weight_decay=1e-5)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
     
-    # 训练
-    train_losses = []
-    val_losses = []
+    train_losses, val_losses = [], []
     best_val_loss = float('inf')
-    best_model_state = None
+    best_state = None
     
     for epoch in range(config['num_epochs']):
-        # 训练阶段
         model.train()
         train_loss = 0
-        for batch_X, batch_y in train_loader:
-            batch_X = batch_X.to(device)
-            batch_y = batch_y.to(device)
-            
+        for X, y in train_loader:
+            X, y = X.to(device), y.to(device)
             optimizer.zero_grad()
-            outputs = model(batch_X)
-            loss = criterion(outputs, batch_y)
+            out = model(X)
+            loss = criterion(out, y)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             train_loss += loss.item()
         
         train_loss /= len(train_loader)
         train_losses.append(train_loss)
         
-        # 验证阶段
         model.eval()
         val_loss = 0
         with torch.no_grad():
-            for batch_X, batch_y in val_loader:
-                batch_X = batch_X.to(device)
-                batch_y = batch_y.to(device)
-                outputs = model(batch_X)
-                loss = criterion(outputs, batch_y)
+            for X, y in val_loader:
+                X, y = X.to(device), y.to(device)
+                loss = criterion(model(X), y)
                 val_loss += loss.item()
         
         val_loss /= len(val_loader)
         val_losses.append(val_loss)
         scheduler.step(val_loss)
         
-        # 保存最佳模型
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            best_model_state = model.state_dict().copy()
+            best_state = model.state_dict().copy()
         
-        # 回调更新进度
-        if progress_callback:
-            progress_callback(epoch + 1, config['num_epochs'], train_loss, val_loss)
+        if progress_cb:
+            progress_cb(epoch + 1, config['num_epochs'], train_loss, val_loss)
     
-    # 加载最佳模型
-    model.load_state_dict(best_model_state)
-    
+    model.load_state_dict(best_state)
     return model, scaler_X, scaler_y, train_losses, val_losses, train_features.columns.tolist()
 
 
 def predict_with_model(model, test_features, test_labels, scaler_X, scaler_y, seq_length, device):
-    """使用模型进行预测"""
-    test_features_scaled = scaler_X.transform(test_features.values)
-    test_labels_scaled = scaler_y.transform(test_labels.values.reshape(-1, 1)).flatten()
+    X_scaled = scaler_X.transform(test_features.values)
+    y_scaled = scaler_y.transform(test_labels.values.reshape(-1, 1)).flatten()
     
     dataset = BatteryDataset(
-        pd.DataFrame(test_features_scaled, columns=test_features.columns),
-        pd.Series(test_labels_scaled),
+        pd.DataFrame(X_scaled, columns=test_features.columns),
+        pd.Series(y_scaled),
         seq_length=seq_length
     )
     loader = DataLoader(dataset, batch_size=32, shuffle=False)
     
     model.eval()
-    predictions = []
-    actuals = []
+    preds, acts = [], []
     
     with torch.no_grad():
-        for batch_X, batch_y in loader:
-            batch_X = batch_X.to(device)
-            outputs = model(batch_X)
-            predictions.extend(outputs.cpu().numpy())
-            actuals.extend(batch_y.numpy())
+        for X, y in loader:
+            out = model(X.to(device))
+            preds.extend(out.cpu().numpy())
+            acts.extend(y.numpy())
     
-    # 反标准化
-    predictions = scaler_y.inverse_transform(np.array(predictions).reshape(-1, 1)).flatten()
-    actuals = scaler_y.inverse_transform(np.array(actuals).reshape(-1, 1)).flatten()
+    preds = scaler_y.inverse_transform(np.array(preds).reshape(-1, 1)).flatten()
+    acts = scaler_y.inverse_transform(np.array(acts).reshape(-1, 1)).flatten()
     
-    # 转换为百分比
-    predictions = predictions * 100
-    actuals = actuals * 100
-    
-    return predictions, actuals, test_features_scaled, dataset
+    return preds * 100, acts * 100, X_scaled, dataset
 
 
-def calculate_shap_values(model, dataset, scaler_X, scaler_y, device, n_background=100, n_samples=200):
-    """计算SHAP值"""
+def calculate_shap_values(model, dataset, scaler_X, scaler_y, device, n_samples=200):
     np.random.seed(42)
     
     seq_length = dataset.seq_length
     feature_names = dataset.feature_names
     n_features = len(feature_names)
     
-    # 准备数据
     max_samples = min(n_samples, len(dataset))
     X_explain = []
     
@@ -759,526 +997,367 @@ def calculate_shap_values(model, dataset, scaler_X, scaler_y, device, n_backgrou
     
     X_explain = np.array(X_explain)
     
-    # 基于扰动的特征重要性计算
     feature_importance = np.zeros(n_features)
     shap_values_all = np.zeros((max_samples, n_features))
     
     model.eval()
     with torch.no_grad():
-        for sample_idx in range(min(50, max_samples)):  # 限制计算量
+        for sample_idx in range(min(50, max_samples)):
             seq = X_explain[sample_idx].reshape(seq_length, n_features)
             seq_tensor = torch.tensor(seq, dtype=torch.float32).unsqueeze(0).to(device)
             base_pred = model(seq_tensor).cpu().numpy()[0]
             
             for j in range(n_features):
-                perturbed_seq = seq.copy()
-                # 将该特征设为0（扰动）
-                perturbed_seq[:, j] = 0
-                perturbed_tensor = torch.tensor(perturbed_seq, dtype=torch.float32).unsqueeze(0).to(device)
+                perturbed = seq.copy()
+                perturbed[:, j] = 0
+                perturbed_tensor = torch.tensor(perturbed, dtype=torch.float32).unsqueeze(0).to(device)
                 perturbed_pred = model(perturbed_tensor).cpu().numpy()[0]
                 
-                importance = base_pred - perturbed_pred
-                feature_importance[j] += abs(importance)
-                shap_values_all[sample_idx, j] = importance
+                imp = base_pred - perturbed_pred
+                feature_importance[j] += abs(imp)
+                shap_values_all[sample_idx, j] = imp
     
     feature_importance /= min(50, max_samples)
     
-    # 归一化
     if feature_importance.max() > 0:
         feature_importance_norm = feature_importance / feature_importance.max()
     else:
         feature_importance_norm = feature_importance
     
-    # 计算每个样本的SHAP值（简化版）
     for sample_idx in range(50, max_samples):
-        # 使用特征重要性作为SHAP值的近似
         shap_values_all[sample_idx] = feature_importance_norm * np.random.randn(n_features) * 0.1
     
     return feature_importance_norm, shap_values_all, X_explain, feature_names
 
 
-def calculate_cycle_shap(model, dataset, cycle_idx, scaler_y, device):
-    """计算特定循环的SHAP值"""
-    if cycle_idx >= len(dataset):
-        return None, None, None
+# ============================================================================
+# Navigation
+# ============================================================================
+def render_nav(lang):
+    st.markdown(f"""
+    <div class="nav-bar">
+        <h1 class="nav-title">{T('title', lang)}</h1>
+        <p class="nav-subtitle">{T('subtitle', lang)}</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+# ============================================================================
+# Results Section
+# ============================================================================
+def render_results(results, selected_cycle, lang):
+    preds = results['predictions']
+    acts = results['actuals']
+    importance = results['feature_importance']
+    shap_vals = results['shap_values']
+    names = results['feature_names']
+    feat_scaled = results['features_scaled']
     
-    seq_X, _ = dataset[cycle_idx]
-    seq_length = dataset.seq_length
-    feature_names = dataset.feature_names
-    n_features = len(feature_names)
+    # SOH Display and Metrics
+    col1, col2, col3, col4 = st.columns([1.5, 0.8, 0.8, 0.8])
     
-    seq = seq_X.numpy()
-    seq_tensor = torch.tensor(seq, dtype=torch.float32).unsqueeze(0).to(device)
-    
-    model.eval()
-    with torch.no_grad():
-        base_pred = model(seq_tensor).cpu().numpy()[0]
+    with col1:
+        current_soh = preds[selected_cycle]
+        actual_soh = acts[selected_cycle]
+        status_text, status_class = get_status(current_soh, lang)
         
-        shap_values = np.zeros(n_features)
-        for j in range(n_features):
-            perturbed_seq = seq.copy()
-            perturbed_seq[:, j] = 0
-            perturbed_tensor = torch.tensor(perturbed_seq, dtype=torch.float32).unsqueeze(0).to(device)
-            perturbed_pred = model(perturbed_tensor).cpu().numpy()[0]
-            shap_values[j] = base_pred - perturbed_pred
-    
-    # 反标准化预测值
-    base_pred_original = scaler_y.inverse_transform([[base_pred]])[0][0]
-    
-    return shap_values, base_pred_original, feature_names
-
-
-# ================================== 绘图函数 ==================================
-def setup_plot_style():
-    """设置绘图样式"""
-    matplotlib.rcParams['font.family'] = 'Arial'
-    matplotlib.rcParams['axes.unicode_minus'] = False
-    matplotlib.rcParams['figure.facecolor'] = 'white'
-    matplotlib.rcParams['axes.facecolor'] = 'white'
-    matplotlib.rcParams['axes.edgecolor'] = '#333333'
-    matplotlib.rcParams['axes.labelcolor'] = '#1d1d1f'
-    matplotlib.rcParams['xtick.color'] = '#1d1d1f'
-    matplotlib.rcParams['ytick.color'] = '#1d1d1f'
-
-
-def create_feature_importance_plot(feature_names, importance_values, lang):
-    """创建特征重要性图"""
-    setup_plot_style()
-    fig, ax = plt.subplots(figsize=(10, 6))
-    
-    sorted_idx = np.argsort(importance_values)
-    n_features = len(sorted_idx)
-    colors = plt.cm.Blues(np.linspace(0.4, 0.9, n_features))
-    
-    bars = ax.barh(range(n_features), importance_values[sorted_idx],
-                   color=colors, alpha=0.9, edgecolor='#007aff', linewidth=0.8)
-    
-    for i, (bar, val) in enumerate(zip(bars, importance_values[sorted_idx])):
-        ax.text(val + 0.01, i, f'{val:.3f}', va='center', fontsize=10, 
-                color='#1d1d1f', fontweight='bold')
-    
-    ax.set_yticks(range(n_features))
-    ax.set_yticklabels([feature_names[i] for i in sorted_idx], fontsize=11, 
-                       color='#1d1d1f', fontweight='500')
-    ax.set_xlabel('Normalized Importance', fontweight='bold', fontsize=12, color='#1d1d1f')
-    ax.set_title(get_text("feature_importance", lang), fontweight='bold', fontsize=14, color='#1d1d1f')
-    
-    ax.grid(axis='x', alpha=0.3, color='#e5e5e5')
-    ax.set_facecolor('#fafafa')
-    for spine in ax.spines.values():
-        spine.set_color('#d0d0d0')
-    
-    plt.tight_layout()
-    return fig
-
-
-def create_prediction_plot(actual, predicted, lang, selected_cycle=None):
-    """创建预测趋势图"""
-    setup_plot_style()
-    fig, ax = plt.subplots(figsize=(12, 5))
-    
-    x = range(len(actual))
-    ax.plot(x, actual, color='#007aff', linewidth=2, label='Actual SOH', marker='o', markersize=3, alpha=0.8)
-    ax.plot(x, predicted, color='#ff9500', linewidth=2, label='Predicted SOH', linestyle='--', alpha=0.8)
-    
-    # 标记选中的循环
-    if selected_cycle is not None and selected_cycle < len(actual):
-        ax.axvline(x=selected_cycle, color='#ff3b30', linestyle=':', linewidth=2, alpha=0.8)
-        ax.scatter([selected_cycle], [actual[selected_cycle]], color='#ff3b30', s=100, zorder=5, 
-                   edgecolors='white', linewidth=2)
-        ax.scatter([selected_cycle], [predicted[selected_cycle]], color='#ff3b30', s=100, zorder=5,
-                   marker='s', edgecolors='white', linewidth=2)
-    
-    ax.fill_between(x, actual, predicted, alpha=0.1, color='#007aff')
-    
-    ax.set_xlabel('Cycle', fontweight='bold', fontsize=12, color='#1d1d1f')
-    ax.set_ylabel('SOH (%)', fontweight='bold', fontsize=12, color='#1d1d1f')
-    ax.set_title(get_text("prediction_trend", lang), fontweight='bold', fontsize=14, color='#1d1d1f')
-    ax.legend(loc='upper right', fontsize=10, framealpha=0.9)
-    ax.grid(True, alpha=0.3, color='#e5e5e5')
-    ax.set_facecolor('#fafafa')
-    
-    for spine in ax.spines.values():
-        spine.set_color('#d0d0d0')
-    
-    plt.tight_layout()
-    return fig
-
-
-def create_waterfall_plot(feature_names, shap_values, base_value, lang, title_suffix=""):
-    """创建SHAP瀑布图"""
-    setup_plot_style()
-    fig, ax = plt.subplots(figsize=(14, 6))
-    
-    # 排序获取最重要的特征
-    sorted_idx = np.argsort(np.abs(shap_values))[::-1][:10]
-    
-    blues_colors = {
-        'pos': '#4292c6',
-        'neg': '#08519c',
-        'base': '#9ecae1',
-        'final': '#08306b'
-    }
-    
-    # 准备数据
-    n_bars = len(sorted_idx) + 2  # base + features + final
-    bar_width = 0.7
-    
-    cumulative = base_value
-    positions = []
-    heights = []
-    colors_list = []
-    labels = ['Base']
-    
-    # 基线
-    positions.append(0)
-    heights.append(base_value)
-    colors_list.append(blues_colors['base'])
-    
-    # 特征贡献
-    for i, idx in enumerate(sorted_idx):
-        val = shap_values[idx]
-        positions.append(i + 1)
-        heights.append(abs(val) * 100)  # 转换为百分比显示
-        colors_list.append(blues_colors['pos'] if val > 0 else blues_colors['neg'])
-        feat_name = feature_names[idx] if idx < len(feature_names) else f'F{idx}'
-        labels.append(feat_name[:15])
-        cumulative += val
-    
-    # 最终值
-    final_value = base_value + shap_values.sum()
-    positions.append(len(sorted_idx) + 1)
-    heights.append(final_value)
-    colors_list.append(blues_colors['final'])
-    labels.append('Final')
-    
-    # 绘制
-    bars = ax.bar(positions, heights, color=colors_list, alpha=0.85, width=bar_width,
-                  edgecolor='white', linewidth=1.5)
-    
-    # 添加数值标签
-    for i, (pos, height, val) in enumerate(zip(positions, heights, heights)):
-        if i == 0:
-            ax.text(pos, height + 0.02, f'{height*100:.1f}%', ha='center', va='bottom',
-                    fontsize=10, fontweight='bold', color='#1d1d1f')
-        elif i == len(positions) - 1:
-            ax.text(pos, height + 0.02, f'{height*100:.1f}%', ha='center', va='bottom',
-                    fontsize=10, fontweight='bold', color='#1d1d1f')
-        else:
-            original_val = shap_values[sorted_idx[i-1]] * 100
-            ax.text(pos, height + 0.005, f'{original_val:+.2f}%', ha='center', va='bottom',
-                    fontsize=9, fontweight='bold', color='#1d1d1f')
-    
-    ax.set_xticks(positions)
-    ax.set_xticklabels(labels, rotation=45, ha='right', fontsize=10, color='#1d1d1f', fontweight='500')
-    ax.set_ylabel('SOH Contribution', fontweight='bold', fontsize=12, color='#1d1d1f')
-    ax.set_title(f'{get_text("waterfall_title", lang)} {title_suffix}', fontweight='bold', fontsize=14, color='#1d1d1f')
-    
-    ax.grid(axis='y', alpha=0.3, color='#e5e5e5')
-    ax.set_facecolor('#fafafa')
-    for spine in ax.spines.values():
-        spine.set_color('#d0d0d0')
-    
-    plt.tight_layout()
-    return fig
-
-
-def create_beeswarm_plot(feature_names, shap_values, feature_values, lang):
-    """创建SHAP蜂群图"""
-    setup_plot_style()
-    fig, ax = plt.subplots(figsize=(10, 7))
-    
-    n_features = len(feature_names)
-    importance = np.abs(shap_values).mean(axis=0)
-    sorted_idx = np.argsort(importance)[-min(12, n_features):]
-    
-    cmap = LinearSegmentedColormap.from_list('custom', ['#fee0d2', '#6baed6', '#08306b'])
-    
-    for i, feat_idx in enumerate(sorted_idx):
-        shap_vals = shap_values[:, feat_idx]
-        
-        # 获取特征值
-        if feature_values is not None and feat_idx < feature_values.shape[1]:
-            feat_vals = feature_values[:len(shap_vals), feat_idx]
-            if feat_vals.max() != feat_vals.min():
-                norm_vals = (feat_vals - feat_vals.min()) / (feat_vals.max() - feat_vals.min())
-            else:
-                norm_vals = np.ones_like(feat_vals) * 0.5
-        else:
-            norm_vals = np.random.rand(len(shap_vals))
-        
-        y_jitter = np.random.normal(0, 0.08, len(shap_vals))
-        y_pos = np.full_like(shap_vals, i) + y_jitter
-        
-        colors_mapped = cmap(norm_vals)
-        sizes = 25 + 60 * np.abs(shap_vals) / (np.max(np.abs(shap_vals)) + 1e-10)
-        
-        ax.scatter(shap_vals, y_pos, c=colors_mapped, s=sizes, alpha=0.6,
-                   edgecolors='white', linewidth=0.3)
-    
-    ax.axvline(x=0, color='gray', linestyle='--', alpha=0.6)
-    ax.set_yticks(range(len(sorted_idx)))
-    ax.set_yticklabels([feature_names[i][:18] for i in sorted_idx], fontsize=11, color='#1d1d1f')
-    ax.set_xlabel('SHAP Value', fontweight='bold', fontsize=12, color='#1d1d1f')
-    ax.set_title(get_text("beeswarm_title", lang), fontweight='bold', fontsize=14, color='#1d1d1f')
-    
-    sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=0, vmax=1))
-    sm.set_array([])
-    cbar = plt.colorbar(sm, ax=ax, shrink=0.8)
-    cbar.set_label('Feature Value (Normalized)', fontsize=10, color='#1d1d1f')
-    cbar.ax.tick_params(labelcolor='#1d1d1f')
-    
-    ax.grid(axis='x', alpha=0.3, color='#e5e5e5')
-    ax.set_facecolor('#fafafa')
-    for spine in ax.spines.values():
-        spine.set_color('#d0d0d0')
-    
-    plt.tight_layout()
-    return fig
-
-
-def create_mechanism_radar(mechanisms, contributions, lang):
-    """创建机理雷达图"""
-    setup_plot_style()
-    fig, ax = plt.subplots(figsize=(6, 6), subplot_kw=dict(projection='polar'))
-    
-    angles = np.linspace(0, 2 * np.pi, len(mechanisms), endpoint=False)
-    values = np.concatenate([contributions, [contributions[0]]])
-    angles = np.concatenate([angles, [angles[0]]])
-    
-    ax.plot(angles, values, 'o-', linewidth=3, color='#007aff', markersize=8,
-            markerfacecolor='#5856d6', markeredgecolor='white', markeredgewidth=2)
-    ax.fill(angles, values, alpha=0.25, color='#007aff')
-    
-    ax.set_xticks(angles[:-1])
-    ax.set_xticklabels(mechanisms, fontsize=10, fontweight='500', color='#1d1d1f')
-    ax.set_ylim(0, 1)
-    ax.grid(True, alpha=0.4, color='#d0d0d0')
-    ax.set_facecolor('#fafafa')
-    
-    # 设置刻度标签颜色
-    ax.tick_params(colors='#1d1d1f')
-    
-    return fig
-
-
-def create_training_curve(train_losses, val_losses, lang):
-    """创建训练曲线图"""
-    setup_plot_style()
-    fig, ax = plt.subplots(figsize=(10, 5))
-    
-    epochs = range(1, len(train_losses) + 1)
-    ax.plot(epochs, train_losses, color='#007aff', linewidth=2, label=get_text('train_loss', lang))
-    ax.plot(epochs, val_losses, color='#ff9500', linewidth=2, label=get_text('val_loss', lang))
-    
-    ax.set_xlabel(get_text('epoch', lang), fontweight='bold', fontsize=12, color='#1d1d1f')
-    ax.set_ylabel(get_text('loss', lang), fontweight='bold', fontsize=12, color='#1d1d1f')
-    ax.set_title('Training Curve', fontweight='bold', fontsize=14, color='#1d1d1f')
-    ax.legend(loc='upper right', fontsize=10)
-    ax.grid(True, alpha=0.3, color='#e5e5e5')
-    ax.set_facecolor('#fafafa')
-    
-    for spine in ax.spines.values():
-        spine.set_color('#d0d0d0')
-    
-    plt.tight_layout()
-    return fig
-
-
-def categorize_mechanisms(feature_names, feature_importance):
-    """根据特征名称分类退化机理"""
-    mechanisms = {
-        'Interface Polarization': [],
-        'Active Material Loss': [],
-        'Transport Limitation': [],
-        'Complex Degradation': []
-    }
-    
-    for i, feature in enumerate(feature_names):
-        feature_lower = feature.lower()
-        if 'cv' in feature_lower:
-            mechanisms['Interface Polarization'].append(i)
-        elif 'cc' in feature_lower:
-            mechanisms['Active Material Loss'].append(i)
-        elif 'slope' in feature_lower:
-            mechanisms['Transport Limitation'].append(i)
-        else:
-            mechanisms['Complex Degradation'].append(i)
-    
-    contributions = []
-    mechanism_names = []
-    
-    for name, indices in mechanisms.items():
-        if indices:
-            contrib = np.mean(feature_importance[indices])
-            contributions.append(contrib)
-            mechanism_names.append(name)
-    
-    contributions = np.array(contributions)
-    if contributions.max() > 0:
-        contributions = contributions / contributions.max()
-    
-    return mechanism_names, contributions
-
-
-# ================================== 主应用 ==================================
-def main():
-    load_css()
-    
-    # 初始化session state
-    if 'lang' not in st.session_state:
-        st.session_state.lang = 'zh'
-    if 'prediction_results' not in st.session_state:
-        st.session_state.prediction_results = None
-    if 'selected_cycle' not in st.session_state:
-        st.session_state.selected_cycle = 0
-    if 'model_data' not in st.session_state:
-        st.session_state.model_data = None
-    
-    lang = st.session_state.lang
-    device = get_device()
-    
-    # 侧边栏
-    with st.sidebar:
-        st.markdown(f"### {get_text('settings', lang)}")
-        
-        # 语言选择
-        lang_options = {'English': 'en', '中文': 'zh'}
-        selected_lang = st.selectbox(
-            get_text('language', lang),
-            options=list(lang_options.keys()),
-            index=1 if lang == 'zh' else 0
-        )
-        if lang_options[selected_lang] != lang:
-            st.session_state.lang = lang_options[selected_lang]
-            st.rerun()
-        
-        st.markdown("---")
-        
-        # 模式选择
-        mode = st.radio(
-            get_text('mode_select', lang),
-            options=[get_text('train_mode', lang), get_text('predict_mode', lang)],
-            index=0
-        )
-        
-        st.markdown("---")
-        
-        # 关于
-        st.markdown(f"#### {get_text('about', lang)}")
         st.markdown(f"""
-        <div class="info-box">
-            <p style="font-size: 0.85rem;">{get_text('about_text', lang)}</p>
+        <div class="soh-display">
+            <div class="soh-value">{current_soh:.1f}%</div>
+            <div class="soh-label">{T('current_soh', lang)}</div>
+            <div style="font-size: 0.8rem; opacity: 0.7; margin-top: 0.5rem;">
+                Cycle {selected_cycle + 1} | Actual: {actual_soh:.1f}%
+            </div>
+            <span class="status-badge {status_class}">{status_text}</span>
         </div>
         """, unsafe_allow_html=True)
-        
-        st.markdown("---")
-        st.markdown(f"**Device:** {device}")
     
-    # 主标题
+    with col2:
+        mae = mean_absolute_error(acts, preds)
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-value">{mae:.3f}%</div>
+            <div class="metric-label">{T('mae', lang)}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        rmse = np.sqrt(mean_squared_error(acts, preds))
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-value">{rmse:.3f}%</div>
+            <div class="metric-label">{T('rmse', lang)}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col4:
+        r2 = r2_score(acts, preds)
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-value">{r2:.4f}</div>
+            <div class="metric-label">{T('r2', lang)}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Prediction Trend
+    st.markdown(f'<div class="section-header">{T("prediction_trend", lang)}</div>', unsafe_allow_html=True)
+    fig_trend = plot_prediction_trend(acts, preds, selected_cycle)
+    st.pyplot(fig_trend)
+    plt.close()
+    
+    # SHAP Analysis
+    st.markdown(f'<div class="section-header">{T("shap_title", lang)}</div>', unsafe_allow_html=True)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        fig1 = plot_feature_importance(names, importance)
+        st.pyplot(fig1)
+        plt.close()
+    
+    with col2:
+        cycle_shap = shap_vals[min(selected_cycle, len(shap_vals)-1)]
+        base_val = np.mean(acts) / 100
+        fig2 = plot_waterfall(names, cycle_shap, base_val, f"(Cycle {selected_cycle + 1})")
+        st.pyplot(fig2)
+        plt.close()
+    
+    # Beeswarm and Mechanism
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        fig3 = plot_beeswarm(names, shap_vals, feat_scaled[:len(shap_vals)])
+        st.pyplot(fig3)
+        plt.close()
+    
+    with col2:
+        st.markdown(f'<div class="section-header">{T("mechanism_analysis", lang)}</div>', unsafe_allow_html=True)
+        
+        mech_names, mech_contrib = categorize_mechanisms(names, importance)
+        
+        fig4 = plot_radar(mech_names, mech_contrib)
+        st.pyplot(fig4)
+        plt.close()
+        
+        for name, contrib in zip(mech_names, mech_contrib):
+            st.markdown(f"""
+            <div class="mechanism-item">
+                <div style="display: flex; justify-content: space-between; font-size: 0.85rem;">
+                    <span style="font-weight: 500;">{name}</span>
+                    <span style="color: {COLORS['primary']}; font-weight: 600;">{contrib*100:.1f}%</span>
+                </div>
+                <div class="mechanism-bar">
+                    <div class="mechanism-fill" style="width: {contrib*100}%;"></div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+    
+    # Download
+    st.markdown("<br>", unsafe_allow_html=True)
+    results_df = pd.DataFrame({
+        'Cycle': range(1, len(preds) + 1),
+        'Actual_SOH': acts,
+        'Predicted_SOH': preds,
+        'Error': acts - preds
+    })
+    
+    csv = results_df.to_csv(index=False)
+    st.download_button(
+        label=T('download_results', lang),
+        data=csv,
+        file_name="soh_predictions.csv",
+        mime="text/csv"
+    )
+
+
+# ============================================================================
+# Page: Demo
+# ============================================================================
+def page_demo(lang):
     st.markdown(f"""
-    <div class="main-header">
-        <h1 class="main-title">{get_text('title', lang)}</h1>
-        <p class="main-subtitle">{get_text('subtitle', lang)}</p>
+    <div class="info-banner">
+        <h3>{T('demo_title', lang)}</h3>
+        <p>{T('demo_desc', lang)}</p>
     </div>
     """, unsafe_allow_html=True)
     
-    # ================== 训练模式 ==================
-    if mode == get_text('train_mode', lang):
-        st.markdown(f'<h3 class="section-header">{get_text("train_title", lang)}</h3>', unsafe_allow_html=True)
-        
-        col1, col2 = st.columns([2, 1])
-        
+    data_files = get_data_files()
+    model_files = get_model_files()
+    
+    if data_files or model_files:
+        col1, col2 = st.columns(2)
         with col1:
-            # 上传训练文件
-            train_files = st.file_uploader(
-                get_text("upload_train", lang),
-                type=['csv'],
-                accept_multiple_files=True,
-                key='train_files'
-            )
-            
-            if train_files:
-                st.success(f"{len(train_files)} {get_text('files_uploaded', lang)}")
-                
-                # 预览第一个文件
-                preview_df = read_csv_file(train_files[0])
-                train_files[0].seek(0)
-                
-                if preview_df is not None:
-                    with st.expander(f"{get_text('features_detected', lang)}: {len(preview_df.columns)}"):
-                        st.write(f"**Columns:** {', '.join(preview_df.columns.tolist())}")
-                        st.dataframe(preview_df.head(5), use_container_width=True)
-            
-            # 上传测试文件
-            st.markdown("---")
-            test_file = st.file_uploader(
-                get_text("upload_test", lang),
-                type=['csv'],
-                key='test_file_train'
-            )
-        
+            if data_files:
+                st.info(f"Found {len(data_files)} data file(s)")
         with col2:
-            st.markdown(f"#### {get_text('model_info', lang)}")
-            
-            target_col = st.text_input(get_text('target_col', lang), value='capacity')
-            rated_capacity = st.number_input(
-                get_text('rated_capacity', lang), 
-                value=2.0, 
-                min_value=0.1, 
-                max_value=1000.0,
-                step=0.1,
-                help=get_text('rated_capacity_help', lang)
-            )
-            seq_length = st.slider(get_text('seq_length', lang), 4, 32, 12)
-            num_epochs = st.slider(get_text('epochs', lang), 10, 200, 100)
-            batch_size = st.selectbox(get_text('batch_size', lang), [16, 32, 64, 128], index=2)
-            learning_rate = st.select_slider(
-                get_text('learning_rate', lang),
-                options=[0.0001, 0.0005, 0.001, 0.005],
-                value=0.0005
-            )
-            model_name = st.text_input(
-                get_text('model_name', lang),
-                value=f"model_{datetime.now().strftime('%Y%m%d_%H%M')}"
-            )
-        
-        # 开始训练按钮
-        if st.button(get_text('start_training', lang), use_container_width=True):
-            if not train_files:
-                st.error("Please upload training files")
-            elif not test_file:
-                st.error("Please upload test file")
-            else:
-                try:
-                    # 重置文件指针
-                    for f in train_files:
-                        f.seek(0)
-                    test_file.seek(0)
-                    
-                    # 加载数据
-                    with st.spinner("Loading data..."):
-                        train_features, train_labels = load_and_preprocess_data(
-                            train_files, target_col, rated_capacity
+            if model_files:
+                st.info(f"Found {len(model_files)} model(s)")
+    
+    # Load demo data
+    if 'demo_results' not in st.session_state:
+        if data_files and model_files:
+            try:
+                device = get_device()
+                model, ckpt = load_model_file(model_files[0], device)
+                scaler_X = ckpt['scaler_X']
+                scaler_y = ckpt['scaler_y']
+                feature_names = ckpt['feature_names']
+                seq_length = ckpt['seq_length']
+                rated_cap = ckpt.get('rated_capacity', 2.0)
+                
+                df = read_csv(data_files[0])
+                if df is not None:
+                    target_col = 'capacity'
+                    if target_col in df.columns:
+                        df['SOH'] = df[target_col] / rated_cap
+                        test_features = df[feature_names].copy()
+                        test_labels = df['SOH']
+                        test_features = test_features.replace([np.inf, -np.inf], np.nan).fillna(0)
+                        test_labels = test_labels.replace([np.inf, -np.inf], np.nan).fillna(0)
+                        
+                        preds, acts, feat_scaled, dataset = predict_with_model(
+                            model, test_features, test_labels, scaler_X, scaler_y, seq_length, device
                         )
                         
-                        test_df = read_csv_file(test_file)
-                        test_file.seek(0)
+                        importance, shap_vals, _, _ = calculate_shap_values(
+                            model, dataset, scaler_X, scaler_y, device
+                        )
                         
-                        if test_df is not None:
-                            test_df['SOH'] = test_df[target_col] / rated_capacity
-                            features_to_drop = ['voltage mean', 'voltage std', 'current mean', 'current std']
-                            available_drops = [f for f in features_to_drop if f in test_df.columns]
-                            if available_drops:
-                                test_df = test_df.drop(available_drops, axis=1)
-                            test_features = test_df.drop([target_col, 'SOH'], axis=1)
-                            test_labels = test_df['SOH']
-                            test_features = test_features.replace([np.inf, -np.inf], np.nan).fillna(0)
-                            test_labels = test_labels.replace([np.inf, -np.inf], np.nan).fillna(0)
+                        st.session_state.demo_results = {
+                            'predictions': preds,
+                            'actuals': acts,
+                            'feature_importance': importance,
+                            'shap_values': shap_vals,
+                            'feature_names': feature_names,
+                            'features_scaled': feat_scaled,
+                            'df': df,
+                            'source': 'repo'
+                        }
+            except Exception as e:
+                st.warning(f"Could not load repository data: {str(e)}")
+        
+        if 'demo_results' not in st.session_state:
+            st.session_state.demo_results = generate_demo_results()
+    
+    results = st.session_state.demo_results
+    
+    if results.get('source') == 'repo':
+        st.success(T('using_repo', lang))
+    else:
+        st.info(T('using_demo', lang))
+    
+    # Cycle selector
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        selected_cycle = st.slider(
+            T('select_cycle', lang),
+            min_value=0,
+            max_value=len(results['predictions']) - 1,
+            value=st.session_state.get('demo_cycle', 0),
+            key='demo_cycle_slider'
+        )
+        st.session_state.demo_cycle = selected_cycle
+    
+    render_results(results, selected_cycle, lang)
+
+
+# ============================================================================
+# Page: Train
+# ============================================================================
+def page_train(lang):
+    st.markdown(f'<div class="section-header">{T("train_title", lang)}</div>', unsafe_allow_html=True)
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        
+        data_source = st.radio(
+            T('data_source', lang),
+            [T('load_from_repo', lang), T('upload_custom', lang)],
+            horizontal=True,
+            key='train_data_source'
+        )
+        
+        train_files = None
+        test_file = None
+        
+        if data_source == T('load_from_repo', lang):
+            data_files = get_data_files()
+            if data_files:
+                train_files = st.multiselect(
+                    T('upload_train', lang),
+                    data_files,
+                    default=data_files[:1] if data_files else [],
+                    format_func=lambda x: os.path.basename(x)
+                )
+                test_file = st.selectbox(
+                    T('upload_test', lang),
+                    data_files,
+                    format_func=lambda x: os.path.basename(x)
+                )
+            else:
+                st.warning(T('no_data', lang))
+        else:
+            train_files = st.file_uploader(T('upload_train', lang), type=['csv'], accept_multiple_files=True)
+            test_file = st.file_uploader(T('upload_test', lang), type=['csv'])
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown(f'<div class="card"><div style="font-weight: 600; margin-bottom: 1rem;">{T("config", lang)}</div>', unsafe_allow_html=True)
+        
+        target_col = st.text_input(T('target_col', lang), value='capacity')
+        rated_cap = st.number_input(T('rated_capacity', lang), value=2.0, min_value=0.1, max_value=1000.0, step=0.1)
+        seq_length = st.slider(T('seq_length', lang), 4, 32, 12)
+        num_epochs = st.slider(T('epochs', lang), 10, 200, 50)
+        batch_size = st.selectbox(T('batch_size', lang), [16, 32, 64, 128], index=1)
+        learning_rate = st.select_slider(T('learning_rate', lang), [0.0001, 0.0005, 0.001, 0.005], value=0.001)
+        model_name = st.text_input(T('model_name', lang), value=f"model_{datetime.now().strftime('%Y%m%d_%H%M')}")
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    if st.button(T('start_training', lang), use_container_width=True):
+        if not train_files or not test_file:
+            st.error("Please select training and test data")
+        else:
+            try:
+                with st.spinner(T('processing', lang)):
+                    all_data = []
+                    for f in train_files:
+                        df = read_csv(f)
+                        if df is not None:
+                            all_data.append(df)
                     
-                    st.info(f"{get_text('total_samples', lang)}: {len(train_features)} | {get_text('features_detected', lang)}: {len(train_features.columns)}")
+                    if not all_data:
+                        st.error("Could not read training files")
+                        return
                     
-                    # 训练配置
+                    combined = pd.concat(all_data, ignore_index=True)
+                    combined['SOH'] = combined[target_col] / rated_cap
+                    
+                    drops = ['voltage mean', 'voltage std', 'current mean', 'current std']
+                    avail_drops = [c for c in drops if c in combined.columns]
+                    if avail_drops:
+                        combined = combined.drop(avail_drops, axis=1)
+                    
+                    train_features = combined.drop([target_col, 'SOH'], axis=1)
+                    train_labels = combined['SOH']
+                    train_features = train_features.replace([np.inf, -np.inf], np.nan).fillna(0)
+                    train_labels = train_labels.replace([np.inf, -np.inf], np.nan).fillna(0)
+                    
+                    test_df = read_csv(test_file)
+                    if test_df is not None:
+                        test_df['SOH'] = test_df[target_col] / rated_cap
+                        if avail_drops:
+                            test_df = test_df.drop([c for c in avail_drops if c in test_df.columns], axis=1)
+                        test_features = test_df.drop([target_col, 'SOH'], axis=1)
+                        test_labels = test_df['SOH']
+                        test_features = test_features.replace([np.inf, -np.inf], np.nan).fillna(0)
+                        test_labels = test_labels.replace([np.inf, -np.inf], np.nan).fillna(0)
+                    
+                    st.info(f"Training: {len(train_features)} samples | {len(train_features.columns)} features")
+                    
                     config = {
                         'seq_length': seq_length,
                         'num_epochs': num_epochs,
@@ -1289,22 +1368,19 @@ def main():
                         'dropout': 0.3
                     }
                     
-                    # 训练进度
                     progress_bar = st.progress(0)
                     status_text = st.empty()
                     
                     def update_progress(epoch, total, train_loss, val_loss):
                         progress_bar.progress(epoch / total)
-                        status_text.text(f"Epoch {epoch}/{total} | Train Loss: {train_loss:.6f} | Val Loss: {val_loss:.6f}")
+                        status_text.text(f"Epoch {epoch}/{total} | Train: {train_loss:.6f} | Val: {val_loss:.6f}")
                     
-                    # 训练模型
-                    model, scaler_X, scaler_y, train_losses, val_losses, feature_names = train_model_func(
+                    model, scaler_X, scaler_y, train_losses, val_losses, feature_names = train_model(
                         train_features, train_labels, config, update_progress
                     )
                     
-                    # 保存模型
-                    models_dir = get_models_dir()
-                    model_path = os.path.join(models_dir, f"{model_name}.pth")
+                    model_path = os.path.join(MODELS_DIR, f"{model_name}.pth")
+                    device = get_device()
                     
                     torch.save({
                         'model_state_dict': model.state_dict(),
@@ -1316,371 +1392,277 @@ def main():
                         'config': config,
                         'train_losses': train_losses,
                         'val_losses': val_losses,
-                        'rated_capacity': rated_capacity
+                        'rated_capacity': rated_cap
                     }, model_path)
                     
-                    st.success(f"{get_text('training_complete', lang)} Model saved: {model_name}.pth")
+                    st.success(f"{T('training_complete', lang)} - {model_name}.pth")
                     
-                    # 显示训练曲线
-                    fig = create_training_curve(train_losses, val_losses, lang)
+                    fig = plot_training_curve(train_losses, val_losses)
                     st.pyplot(fig)
                     plt.close()
                     
-                    # 进行预测
-                    predictions, actuals, features_scaled, dataset = predict_with_model(
+                    preds, acts, feat_scaled, dataset = predict_with_model(
                         model, test_features, test_labels, scaler_X, scaler_y, seq_length, device
                     )
                     
-                    # 计算SHAP值
-                    feature_importance, shap_values, X_explain, _ = calculate_shap_values(
+                    importance, shap_vals, _, _ = calculate_shap_values(
                         model, dataset, scaler_X, scaler_y, device
                     )
                     
-                    # 保存结果到session state
-                    st.session_state.prediction_results = {
-                        'predictions': predictions,
-                        'actuals': actuals,
-                        'feature_importance': feature_importance,
-                        'shap_values': shap_values,
+                    st.session_state.train_results = {
+                        'predictions': preds,
+                        'actuals': acts,
+                        'feature_importance': importance,
+                        'shap_values': shap_vals,
                         'feature_names': feature_names,
-                        'features_scaled': features_scaled,
-                        'dataset': dataset
+                        'features_scaled': feat_scaled,
                     }
-                    st.session_state.model_data = {
-                        'model': model,
-                        'scaler_X': scaler_X,
-                        'scaler_y': scaler_y,
-                        'seq_length': seq_length,
-                        'feature_names': feature_names
-                    }
-                    st.session_state.selected_cycle = 0
                     
-                except Exception as e:
-                    st.error(f"Error: {str(e)}")
-                    import traceback
-                    st.code(traceback.format_exc())
+            except Exception as e:
+                st.error(f"Error: {str(e)}")
+                import traceback
+                st.code(traceback.format_exc())
     
-    # ================== 预测模式 ==================
-    else:
-        st.markdown(f'<h3 class="section-header">{get_text("predict_mode", lang)}</h3>', unsafe_allow_html=True)
+    if 'train_results' in st.session_state and st.session_state.train_results:
+        results = st.session_state.train_results
+        selected = st.slider("Select Cycle", 0, len(results['predictions'])-1, 0, key='train_cycle')
+        render_results(results, selected, lang)
+
+
+# ============================================================================
+# Page: Predict
+# ============================================================================
+def page_predict(lang):
+    st.markdown(f'<div class="section-header">{T("predict_title", lang)}</div>', unsafe_allow_html=True)
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
         
-        col1, col2 = st.columns([2, 1])
+        data_source = st.radio(
+            T('data_source', lang),
+            [T('load_from_repo', lang), T('upload_custom', lang)],
+            horizontal=True,
+            key='predict_data_source'
+        )
         
-        with col1:
-            # 上传测试文件
-            test_file = st.file_uploader(
-                get_text("upload_test", lang),
-                type=['csv'],
-                key='test_file_predict'
-            )
-            
-            if test_file:
-                preview_df = read_csv_file(test_file)
-                test_file.seek(0)
-                
-                if preview_df is not None:
-                    st.success(get_text('files_uploaded', lang))
-                    with st.expander(f"{get_text('features_detected', lang)}: {len(preview_df.columns)}"):
-                        st.dataframe(preview_df.head(5), use_container_width=True)
+        test_file = None
         
-        with col2:
-            st.markdown(f"#### {get_text('model_info', lang)}")
-            
-            # 选择模型来源
-            model_source = st.radio(
-                "Model Source",
-                options=["Saved Models", "Upload Model"],
-                index=0
-            )
-            
-            selected_model = None
-            uploaded_model = None
-            
-            if model_source == "Saved Models":
-                saved_models = get_saved_models()
-                if saved_models:
-                    selected_model = st.selectbox(
-                        get_text('select_model', lang),
-                        options=saved_models
-                    )
-                else:
-                    st.warning(get_text('no_model', lang))
-            else:
-                uploaded_model = st.file_uploader(
-                    get_text('upload_model', lang),
-                    type=['pth'],
-                    key='upload_model'
+        if data_source == T('load_from_repo', lang):
+            data_files = get_data_files()
+            if data_files:
+                test_file = st.selectbox(
+                    T('upload_test', lang),
+                    data_files,
+                    format_func=lambda x: os.path.basename(x),
+                    key='predict_data_select'
                 )
-            
-            target_col = st.text_input(get_text('target_col', lang), value='capacity', key='predict_target')
-            rated_capacity = st.number_input(
-                get_text('rated_capacity', lang), 
-                value=2.0, 
-                min_value=0.1, 
-                max_value=1000.0,
-                step=0.1,
-                help=get_text('rated_capacity_help', lang),
-                key='predict_capacity'
-            )
-        
-        # 开始预测按钮
-        if st.button(get_text('start_predict', lang), use_container_width=True):
-            if not test_file:
-                st.error("Please upload test file")
-            elif model_source == "Saved Models" and not selected_model:
-                st.error("Please select a model")
-            elif model_source == "Upload Model" and not uploaded_model:
-                st.error("Please upload a model")
             else:
-                try:
-                    with st.spinner(get_text('processing', lang)):
-                        # 加载模型
-                        if model_source == "Saved Models":
-                            models_dir = get_models_dir()
-                            checkpoint = torch.load(os.path.join(models_dir, selected_model), map_location=device)
-                        else:
-                            checkpoint = torch.load(uploaded_model, map_location=device)
-                        
-                        input_dim = checkpoint['input_dim']
-                        seq_length = checkpoint['seq_length']
-                        feature_names = checkpoint['feature_names']
-                        scaler_X = checkpoint['scaler_X']
-                        scaler_y = checkpoint['scaler_y']
-                        config = checkpoint.get('config', {})
-                        
-                        model = CBAMCNNTransformer(
-                            input_dim=input_dim,
-                            embed_dim=128,
-                            num_heads=config.get('num_heads', 8),
-                            num_layers=config.get('num_layers', 4),
-                            dropout=config.get('dropout', 0.3)
-                        ).to(device)
-                        model.load_state_dict(checkpoint['model_state_dict'])
-                        
-                        # 加载测试数据
-                        test_file.seek(0)
-                        test_df = read_csv_file(test_file)
-                        
-                        if test_df is not None:
-                            test_df['SOH'] = test_df[target_col] / rated_capacity
-                            features_to_drop = ['voltage mean', 'voltage std', 'current mean', 'current std']
-                            available_drops = [f for f in features_to_drop if f in test_df.columns]
-                            if available_drops:
-                                test_df = test_df.drop(available_drops, axis=1)
-                            
-                            test_features = test_df[feature_names].copy()
-                            test_labels = test_df['SOH']
-                            test_features = test_features.replace([np.inf, -np.inf], np.nan).fillna(0)
-                            test_labels = test_labels.replace([np.inf, -np.inf], np.nan).fillna(0)
-                            
-                            # 预测
-                            predictions, actuals, features_scaled, dataset = predict_with_model(
-                                model, test_features, test_labels, scaler_X, scaler_y, seq_length, device
-                            )
-                            
-                            # 计算SHAP值
-                            feature_importance, shap_values, X_explain, _ = calculate_shap_values(
-                                model, dataset, scaler_X, scaler_y, device
-                            )
-                            
-                            # 保存结果
-                            st.session_state.prediction_results = {
-                                'predictions': predictions,
-                                'actuals': actuals,
-                                'feature_importance': feature_importance,
-                                'shap_values': shap_values,
-                                'feature_names': feature_names,
-                                'features_scaled': features_scaled,
-                                'dataset': dataset
-                            }
-                            st.session_state.model_data = {
-                                'model': model,
-                                'scaler_X': scaler_X,
-                                'scaler_y': scaler_y,
-                                'seq_length': seq_length,
-                                'feature_names': feature_names
-                            }
-                            st.session_state.selected_cycle = 0
-                            
-                            st.success(get_text('prediction_complete', lang))
-                
-                except Exception as e:
-                    st.error(f"Error: {str(e)}")
-                    import traceback
-                    st.code(traceback.format_exc())
-    
-    # ================== 显示预测结果 ==================
-    if st.session_state.prediction_results is not None:
-        results = st.session_state.prediction_results
-        predictions = results['predictions']
-        actuals = results['actuals']
-        feature_importance = results['feature_importance']
-        shap_values = results['shap_values']
-        feature_names = results['feature_names']
-        features_scaled = results['features_scaled']
-        dataset = results['dataset']
-        
-        model_data = st.session_state.model_data
-        
-        st.markdown(f'<h3 class="section-header">{get_text("results_title", lang)}</h3>', unsafe_allow_html=True)
-        
-        # 循环选择器
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            st.markdown('<div class="cycle-selector">', unsafe_allow_html=True)
-            selected_cycle = st.slider(
-                get_text("select_cycle", lang),
-                min_value=0,
-                max_value=len(predictions) - 1,
-                value=st.session_state.selected_cycle,
-                key='cycle_slider'
-            )
-            st.session_state.selected_cycle = selected_cycle
-            st.markdown('</div>', unsafe_allow_html=True)
-        
-        # SOH显示和指标
-        col1, col2, col3 = st.columns([1.5, 1, 1])
-        
-        with col1:
-            current_soh = predictions[selected_cycle]
-            actual_soh = actuals[selected_cycle]
-            status_text, status_class = get_health_status(current_soh, lang)
-            
-            st.markdown(f"""
-            <div class="soh-display">
-                <div class="soh-value">{current_soh:.1f}%</div>
-                <div class="soh-label">{get_text('current_soh', lang)} (Cycle {selected_cycle + 1})</div>
-                <span class="status-badge {status_class}">{status_text}</span>
-                <div style="margin-top: 0.5rem; font-size: 0.9rem; opacity: 0.8;">
-                    Actual: {actual_soh:.1f}%
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col2:
-            mae = mean_absolute_error(actuals, predictions)
-            rmse = np.sqrt(mean_squared_error(actuals, predictions))
-            
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-value">{mae:.3f}%</div>
-                <div class="metric-label">{get_text('mae', lang)}</div>
-            </div>
-            <br>
-            <div class="metric-card">
-                <div class="metric-value">{rmse:.3f}%</div>
-                <div class="metric-label">{get_text('rmse', lang)}</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col3:
-            r2 = r2_score(actuals, predictions)
-            mape = np.mean(np.abs((actuals - predictions) / (actuals + 1e-10))) * 100
-            
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-value">{r2:.4f}</div>
-                <div class="metric-label">{get_text('r2', lang)}</div>
-            </div>
-            <br>
-            <div class="metric-card">
-                <div class="metric-value">{len(predictions)}</div>
-                <div class="metric-label">{get_text('samples', lang)}</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        # 预测趋势图（带标记）
-        st.markdown("<br>", unsafe_allow_html=True)
-        fig_trend = create_prediction_plot(actuals, predictions, lang, selected_cycle)
-        st.pyplot(fig_trend)
-        plt.close()
-        
-        # SHAP分析
-        st.markdown(f'<h3 class="section-header">{get_text("shap_title", lang)}</h3>', unsafe_allow_html=True)
-        
-        # 计算当前循环的SHAP值
-        if model_data is not None:
-            cycle_shap, cycle_base, _ = calculate_cycle_shap(
-                model_data['model'], 
-                dataset, 
-                selected_cycle,
-                model_data['scaler_y'],
-                device
-            )
+                st.warning(T('no_data', lang))
         else:
-            cycle_shap = shap_values[min(selected_cycle, len(shap_values)-1)] if len(shap_values) > 0 else None
-            cycle_base = np.mean(actuals) / 100
+            test_file = st.file_uploader(T('upload_test', lang), type=['csv'], key='predict_upload')
         
-        col1, col2 = st.columns(2)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown(f'<div class="card"><div style="font-weight: 600; margin-bottom: 1rem;">{T("config", lang)}</div>', unsafe_allow_html=True)
         
-        with col1:
-            fig1 = create_feature_importance_plot(feature_names, feature_importance, lang)
-            st.pyplot(fig1)
-            plt.close()
+        model_source = st.radio(
+            T('model_source', lang),
+            [T('load_from_repo', lang), T('upload_custom', lang)],
+            horizontal=True,
+            key='predict_model_source'
+        )
         
-        with col2:
-            if cycle_shap is not None:
-                fig2 = create_waterfall_plot(
-                    feature_names, 
-                    cycle_shap, 
-                    cycle_base if cycle_base else np.mean(actuals) / 100,
-                    lang,
-                    f"(Cycle {selected_cycle + 1})"
+        selected_model = None
+        uploaded_model = None
+        
+        if model_source == T('load_from_repo', lang):
+            model_files = get_model_files()
+            if model_files:
+                selected_model = st.selectbox(
+                    T('select_model', lang),
+                    model_files,
+                    format_func=lambda x: os.path.basename(x)
                 )
-                st.pyplot(fig2)
-                plt.close()
+            else:
+                st.warning(T('no_model', lang))
+        else:
+            uploaded_model = st.file_uploader(T('upload_model', lang), type=['pth'])
         
-        # 蜂群图和机理分析
-        col1, col2 = st.columns(2)
+        target_col = st.text_input(T('target_col', lang), value='capacity', key='predict_target')
+        rated_cap = st.number_input(T('rated_capacity', lang), value=2.0, min_value=0.1, max_value=1000.0, step=0.1, key='predict_cap')
         
-        with col1:
-            fig3 = create_beeswarm_plot(feature_names, shap_values, features_scaled[:len(shap_values)], lang)
-            st.pyplot(fig3)
-            plt.close()
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    if st.button(T('start_predict', lang), use_container_width=True):
+        if not test_file:
+            st.error("Please select test data")
+        elif model_source == T('load_from_repo', lang) and not selected_model:
+            st.error("Please select a model")
+        elif model_source == T('upload_custom', lang) and not uploaded_model:
+            st.error("Please upload a model")
+        else:
+            try:
+                with st.spinner(T('processing', lang)):
+                    device = get_device()
+                    
+                    if model_source == T('load_from_repo', lang):
+                        model, ckpt = load_model_file(selected_model, device)
+                    else:
+                        ckpt = torch.load(uploaded_model, map_location=device, weights_only=False)
+                        cfg = ckpt.get('config', {})
+                        model = CBAMCNNTransformer(
+                            input_dim=ckpt['input_dim'],
+                            embed_dim=128,
+                            num_heads=cfg.get('num_heads', 8),
+                            num_layers=cfg.get('num_layers', 4),
+                            dropout=cfg.get('dropout', 0.3)
+                        ).to(device)
+                        model.load_state_dict(ckpt['model_state_dict'])
+                    
+                    scaler_X = ckpt['scaler_X']
+                    scaler_y = ckpt['scaler_y']
+                    feature_names = ckpt['feature_names']
+                    seq_length = ckpt['seq_length']
+                    
+                    test_df = read_csv(test_file)
+                    if test_df is not None:
+                        test_df['SOH'] = test_df[target_col] / rated_cap
+                        
+                        drops = ['voltage mean', 'voltage std', 'current mean', 'current std']
+                        avail_drops = [c for c in drops if c in test_df.columns]
+                        if avail_drops:
+                            test_df = test_df.drop(avail_drops, axis=1)
+                        
+                        test_features = test_df[feature_names].copy()
+                        test_labels = test_df['SOH']
+                        test_features = test_features.replace([np.inf, -np.inf], np.nan).fillna(0)
+                        test_labels = test_labels.replace([np.inf, -np.inf], np.nan).fillna(0)
+                        
+                        preds, acts, feat_scaled, dataset = predict_with_model(
+                            model, test_features, test_labels, scaler_X, scaler_y, seq_length, device
+                        )
+                        
+                        importance, shap_vals, _, _ = calculate_shap_values(
+                            model, dataset, scaler_X, scaler_y, device
+                        )
+                        
+                        st.session_state.predict_results = {
+                            'predictions': preds,
+                            'actuals': acts,
+                            'feature_importance': importance,
+                            'shap_values': shap_vals,
+                            'feature_names': feature_names,
+                            'features_scaled': feat_scaled,
+                        }
+                        
+                        st.success(T('prediction_complete', lang))
+                
+            except Exception as e:
+                st.error(f"Error: {str(e)}")
+                import traceback
+                st.code(traceback.format_exc())
+    
+    if 'predict_results' in st.session_state and st.session_state.predict_results:
+        results = st.session_state.predict_results
+        selected = st.slider("Select Cycle", 0, len(results['predictions'])-1, 0, key='predict_cycle')
+        render_results(results, selected, lang)
+
+
+# ============================================================================
+# Page: About
+# ============================================================================
+def page_about(lang):
+    st.markdown(f'<div class="section-header">{T("about_title", lang)}</div>', unsafe_allow_html=True)
+    
+    st.markdown(f"""
+    <div class="card">
+        <p style="color: {COLORS['text_secondary']}; margin-bottom: 1.5rem;">{T('about_text', lang)}</p>
         
-        with col2:
-            st.markdown(f'<h4 style="color: #1d1d1f; font-weight: 600;">{get_text("mechanism_analysis", lang)}</h4>', unsafe_allow_html=True)
-            
-            mechanism_names, contributions = categorize_mechanisms(feature_names, feature_importance)
-            
-            fig4 = create_mechanism_radar(mechanism_names, contributions, lang)
-            st.pyplot(fig4)
-            plt.close()
-            
-            # 机理贡献条形图
-            for name, contrib in zip(mechanism_names, contributions):
-                st.markdown(f"""
-                <div class="mechanism-card">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-weight: 500; color: #1d1d1f; font-size: 0.9rem;">{name}</span>
-                        <span style="color: #007aff; font-weight: 600;">{contrib*100:.1f}%</span>
-                    </div>
-                    <div class="mechanism-bar">
-                        <div class="mechanism-fill" style="width: {contrib*100}%;"></div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+        <div style="background: {COLORS['bg']}; padding: 1rem; border-radius: 8px; margin: 1rem 0;">
+            <h4 style="margin: 0 0 0.5rem 0; color: {COLORS['text']};">CBAM-CNN-Transformer Model</h4>
+            <p style="margin: 0; color: {COLORS['text_secondary']}; font-size: 0.9rem;">
+                CNN with Convolutional Block Attention Module (CBAM) and Transformer encoder for SOH prediction.
+            </p>
+        </div>
         
-        # 下载结果
-        st.markdown("<br>", unsafe_allow_html=True)
+        <div style="background: {COLORS['bg']}; padding: 1rem; border-radius: 8px; margin: 1rem 0;">
+            <h4 style="margin: 0 0 0.5rem 0; color: {COLORS['text']};">SHAP Interpretability</h4>
+            <p style="margin: 0; color: {COLORS['text_secondary']}; font-size: 0.9rem;">
+                SHAP values for transparent and interpretable predictions.
+            </p>
+        </div>
         
-        results_df = pd.DataFrame({
-            'Cycle': range(1, len(predictions) + 1),
-            'Actual_SOH': actuals,
-            'Predicted_SOH': predictions,
-            'Error': actuals - predictions
-        })
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            csv = results_df.to_csv(index=False)
-            st.download_button(
-                label=get_text("download_results", lang),
-                data=csv,
-                file_name="soh_predictions.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
+        <div style="background: {COLORS['bg']}; padding: 1rem; border-radius: 8px; margin: 1rem 0;">
+            <h4 style="margin: 0 0 0.5rem 0; color: {COLORS['text']};">Repository Structure</h4>
+            <p style="margin: 0; color: {COLORS['text_secondary']}; font-size: 0.9rem;">
+                Place data in <code>data/</code> folder and models in <code>saved_models/</code> folder.
+            </p>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+# ============================================================================
+# Main
+# ============================================================================
+def main():
+    load_css()
+    
+    if 'lang' not in st.session_state:
+        st.session_state.lang = 'zh'
+    if 'page' not in st.session_state:
+        st.session_state.page = 'demo'
+    if 'demo_cycle' not in st.session_state:
+        st.session_state.demo_cycle = 0
+    
+    lang = st.session_state.lang
+    page = st.session_state.page
+    
+    render_nav(lang)
+    
+    # Navigation buttons
+    col1, col2, col3, col4, col5 = st.columns(5)
+    
+    with col1:
+        if st.button(T('nav_demo', lang), key='btn_demo', use_container_width=True):
+            st.session_state.page = 'demo'
+            st.rerun()
+    
+    with col2:
+        if st.button(T('nav_train', lang), key='btn_train', use_container_width=True):
+            st.session_state.page = 'train'
+            st.rerun()
+    
+    with col3:
+        if st.button(T('nav_predict', lang), key='btn_predict', use_container_width=True):
+            st.session_state.page = 'predict'
+            st.rerun()
+    
+    with col4:
+        if st.button(T('nav_about', lang), key='btn_about', use_container_width=True):
+            st.session_state.page = 'about'
+            st.rerun()
+    
+    with col5:
+        lang_label = "English" if lang == 'zh' else "中文"
+        if st.button(lang_label, key='btn_lang', use_container_width=True):
+            st.session_state.lang = 'en' if lang == 'zh' else 'zh'
+            st.rerun()
+    
+    st.markdown(f"<hr style='margin: 1rem 0; border: none; border-top: 1px solid {COLORS['border']};'>", unsafe_allow_html=True)
+    
+    # Render page
+    if page == 'demo':
+        page_demo(lang)
+    elif page == 'train':
+        page_train(lang)
+    elif page == 'predict':
+        page_predict(lang)
+    elif page == 'about':
+        page_about(lang)
 
 
 if __name__ == "__main__":
