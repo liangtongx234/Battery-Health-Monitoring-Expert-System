@@ -593,112 +593,157 @@ class IdentityScaler:
     def inverse_transform(self, X): return X
 
 
-def _infer_input_dim_from_state_dict(sd: dict) -> int | None:
+def _infer_input_dim_from_state_dict(sd: dict):
     """
-    从第一层Conv1d权重推断 input_dim
+    Infer input_dim from the first Conv1d layer weight.
     Conv1d.weight shape: [out_channels, in_channels, kernel_size]
+
+    Checks both new and legacy key names.
     """
-    for k in ("cnn_block1.0.weight", "cnn1.0.weight"):
-        if k in sd and hasattr(sd[k], "shape") and len(sd[k].shape) == 3:
-            return int(sd[k].shape[1])
+    # List of possible key names for the first conv layer
+    possible_keys = [
+        "cnn_block1.0.weight",  # New naming
+        "cnn1.0.weight",  # Legacy naming
+    ]
+
+    for k in possible_keys:
+        if k in sd:
+            weight = sd[k]
+            if hasattr(weight, "shape") and len(weight.shape) == 3:
+                return int(weight.shape[1])  # in_channels dimension
+
     return None
 
 
 def _remap_legacy_state_dict(sd: dict) -> dict:
     """
-    兼容旧模型命名：
-    cnn1->cnn_block1, cnn2->cnn_block2,
-    pos_enc->positional_encoding,
-    transformer->transformer_encoder,
-    attn_pool->attention_pool,
-    fc->fc_out,
-    query->pool_query,
-    cbam?.ca/sa -> cbam?.channel_attention/spatial_attention
+    Remap legacy model key names to current architecture names.
     """
     out = {}
     for k, v in sd.items():
         nk = k
 
-        # 单独处理 query
+        # Handle standalone 'query' key
         if nk == "query":
             nk = "pool_query"
 
-        # 前缀映射
-        if nk.startswith("cnn1."):
-            nk = nk.replace("cnn1.", "cnn_block1.", 1)
-        if nk.startswith("cnn2."):
-            nk = nk.replace("cnn2.", "cnn_block2.", 1)
+        # Prefix mappings
+        prefix_mappings = [
+            ("cnn1.", "cnn_block1."),
+            ("cnn2.", "cnn_block2."),
+            ("pos_enc.", "positional_encoding."),
+            ("transformer.", "transformer_encoder."),
+            ("attn_pool.", "attention_pool."),
+            ("fc.", "fc_out."),
+            ("cbam1.ca.", "cbam1.channel_attention."),
+            ("cbam1.sa.", "cbam1.spatial_attention."),
+            ("cbam2.ca.", "cbam2.channel_attention."),
+            ("cbam2.sa.", "cbam2.spatial_attention."),
+        ]
 
-        if nk.startswith("pos_enc."):
-            nk = nk.replace("pos_enc.", "positional_encoding.", 1)
-
-        if nk.startswith("transformer."):
-            nk = nk.replace("transformer.", "transformer_encoder.", 1)
-
-        if nk.startswith("attn_pool."):
-            nk = nk.replace("attn_pool.", "attention_pool.", 1)
-
-        if nk.startswith("fc."):
-            nk = nk.replace("fc.", "fc_out.", 1)
-
-        if nk.startswith("cbam1.ca."):
-            nk = nk.replace("cbam1.ca.", "cbam1.channel_attention.", 1)
-        if nk.startswith("cbam1.sa."):
-            nk = nk.replace("cbam1.sa.", "cbam1.spatial_attention.", 1)
-
-        if nk.startswith("cbam2.ca."):
-            nk = nk.replace("cbam2.ca.", "cbam2.channel_attention.", 1)
-        if nk.startswith("cbam2.sa."):
-            nk = nk.replace("cbam2.sa.", "cbam2.spatial_attention.", 1)
+        for old_prefix, new_prefix in prefix_mappings:
+            if nk.startswith(old_prefix):
+                nk = nk.replace(old_prefix, new_prefix, 1)
+                break
 
         out[nk] = v
     return out
 
 
-def load_model_file(path_or_file, device):
+class IdentityScaler:
+    """Dummy scaler that returns input unchanged."""
+
+    def fit(self, X):
+        return self
+
+    def transform(self, X):
+        return X
+
+    def inverse_transform(self, X):
+        return X
+
+
+def load_model_file(path_or_file, device, CBAMCNNTransformer):
     """
-    ✅ 兼容三种保存格式：
-    1) 新格式：{'model_state_dict', 'input_dim', 'feature_names', 'scaler_X', 'scaler_y', 'seq_length', 'config', ...}
-    2) 旧格式（代码1）：{'model_state_dict', 'train_losses', ...} 没 input_dim/feature_names/scaler
-    3) 纯 state_dict：直接 torch.save(model.state_dict())
+    Load a model file with full backward compatibility.
+
+    Supports:
+    1. New format: {'model_state_dict', 'input_dim', 'feature_names', 'scaler_X', 'scaler_y', ...}
+    2. Old format: {'model_state_dict', 'train_losses', ...} without input_dim/feature_names/scaler
+    3. Pure state_dict: Just torch.save(model.state_dict())
+
+    Args:
+        path_or_file: Path string or file-like object
+        device: torch device
+        CBAMCNNTransformer: The model class
+
+    Returns:
+        model: Loaded model
+        ckpt: Checkpoint dict with all necessary fields populated
     """
+    import torch
+
+    # Load checkpoint
     ckpt = torch.load(path_or_file, map_location=device, weights_only=False)
 
-    # ---- 取 state_dict ----
+    # Handle different checkpoint formats
     if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
         sd_raw = ckpt["model_state_dict"]
     else:
-        # 纯state_dict
+        # Pure state_dict was saved
         sd_raw = ckpt
         ckpt = {"model_state_dict": sd_raw}
 
-    # ---- remap legacy keys ----
+    # Remap legacy key names
     sd = _remap_legacy_state_dict(sd_raw)
 
-    # ---- input_dim 推断/补齐：绝不使用 ckpt['input_dim'] ----
-    input_dim = ckpt.get("input_dim", None)
+    # ========================================
+    # CRITICAL: Infer input_dim robustly
+    # ========================================
+    input_dim = None
 
+    # Method 1: Try to get from checkpoint directly
+    if "input_dim" in ckpt and ckpt["input_dim"] is not None:
+        try:
+            input_dim = int(ckpt["input_dim"])
+        except (ValueError, TypeError):
+            pass
+
+    # Method 2: Infer from feature_names if available
     if input_dim is None:
-        # 如果有 feature_names，用它长度
         fn = ckpt.get("feature_names", None)
         if isinstance(fn, (list, tuple)) and len(fn) > 0:
             input_dim = len(fn)
-        else:
-            # 从 conv1d 权重推断
-            input_dim = _infer_input_dim_from_state_dict(sd)
 
+    # Method 3: Infer from model weights (most reliable for legacy models)
     if input_dim is None:
-        raise KeyError("input_dim (cannot infer from checkpoint/state_dict)")
+        input_dim = _infer_input_dim_from_state_dict(sd)
+
+    # If still None, we cannot proceed
+    if input_dim is None:
+        raise ValueError(
+            "Cannot determine input_dim from checkpoint. "
+            "The model file may be corrupted or in an unsupported format. "
+            "Expected to find either 'input_dim' key, 'feature_names' list, "
+            "or valid Conv1d weights to infer from."
+        )
 
     input_dim = int(input_dim)
 
-    # ---- config 默认值 ----
-    cfg = ckpt.get("config", {}) if isinstance(ckpt.get("config", {}), dict) else {}
+    # ========================================
+    # Get model configuration with defaults
+    # ========================================
+    cfg = ckpt.get("config", {})
+    if not isinstance(cfg, dict):
+        cfg = {}
+
     num_heads = int(cfg.get("num_heads", 8))
     num_layers = int(cfg.get("num_layers", 4))
     dropout = float(cfg.get("dropout", 0.3))
 
-    # ---- 构建模型 ----
+    # ========================================
+    # Build and load model
+    # ========================================
     model = CBAMCNNTransformer(
         input_dim=input_dim,
         embed_dim=128,
@@ -707,38 +752,33 @@ def load_model_file(path_or_file, device):
         dropout=dropout
     ).to(device)
 
-    # ---- 加载权重：strict=False 保命（旧模型字段不全）----
+    # Load weights with strict=False to handle partial matches
     missing, unexpected = model.load_state_dict(sd, strict=False)
 
-    # ---- ckpt 里补齐必须字段（防止后面 predict 访问炸）----
+    # ========================================
+    # Populate checkpoint with all required fields
+    # ========================================
     ckpt["input_dim"] = input_dim
     ckpt["config"] = cfg
 
     if "seq_length" not in ckpt:
         ckpt["seq_length"] = 12
+
     if "rated_capacity" not in ckpt:
         ckpt["rated_capacity"] = 2.0
 
-    if "scaler_X" not in ckpt:
+    if "scaler_X" not in ckpt or ckpt["scaler_X"] is None:
         ckpt["scaler_X"] = IdentityScaler()
-    if "scaler_y" not in ckpt:
+
+    if "scaler_y" not in ckpt or ckpt["scaler_y"] is None:
         ckpt["scaler_y"] = IdentityScaler()
 
     if "feature_names" not in ckpt or not isinstance(ckpt.get("feature_names"), (list, tuple)):
         ckpt["feature_names"] = [f"f{i}" for i in range(input_dim)]
 
-    # ---- 友好提示（可选）----
-    try:
-        import streamlit as st
-        if missing or unexpected:
-            st.warning(
-                "已兼容加载模型（strict=False）。\n"
-                f"Missing: {len(missing)} | Unexpected: {len(unexpected)}\n"
-                "旧模型未保存input_dim/feature_names/scaler时属于正常现象；"
-                "预测阶段将从CSV自动选取特征列。"
-            )
-    except:
-        pass
+    # Optional: Log loading info
+    if missing or unexpected:
+        print(f"Model loaded with strict=False: {len(missing)} missing, {len(unexpected)} unexpected keys")
 
     return model, ckpt
 
