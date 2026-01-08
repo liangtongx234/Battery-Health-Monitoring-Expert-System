@@ -505,7 +505,6 @@ class CBAMCNNTransformer(nn.Module):
 
 
 def load_model_from_path(model_path, device):
-    """Load model from file path"""
     checkpoint = torch.load(model_path, map_location=device, weights_only=False)
 
     input_dim = checkpoint['input_dim']
@@ -518,9 +517,17 @@ def load_model_from_path(model_path, device):
         num_layers=config.get('num_layers', 4),
         dropout=config.get('dropout', 0.3)
     ).to(device)
-    model.load_state_dict(checkpoint['model_state_dict'])
 
+    sd = checkpoint['model_state_dict']
+
+    legacy_markers = ("cnn1.", "cnn2.", "query", "pos_enc.", "transformer.", "attn_pool.", "fc.", "cbam1.ca.", "cbam1.sa.")
+    is_legacy = any(any(k.startswith(m) or k == m for m in legacy_markers) for k in sd.keys())
+    if is_legacy:
+        sd = remap_legacy_state_dict(sd)
+
+    model.load_state_dict(sd, strict=True)
     return model, checkpoint
+
 import random
 import copy
 
@@ -601,11 +608,45 @@ def read_csv(file_or_path):
             except:
                 continue
     return None
+def remap_legacy_state_dict(state_dict: dict) -> dict:
+
+    mapping_prefix = [
+        ("cnn1.", "cnn_block1."),
+        ("cnn2.", "cnn_block2."),
+        ("query", "pool_query"),
+        ("pos_enc.", "positional_encoding."),
+        ("transformer.", "transformer_encoder."),
+        ("attn_pool.", "attention_pool."),
+        ("fc.", "fc_out."),
+        ("cbam1.ca.", "cbam1.channel_attention."),
+        ("cbam1.sa.", "cbam1.spatial_attention."),
+        ("cbam2.ca.", "cbam2.channel_attention."),
+        ("cbam2.sa.", "cbam2.spatial_attention."),
+    ]
+
+    new_sd = {}
+    for k, v in state_dict.items():
+        nk = k
+
+
+        if nk == "query":
+            nk = "pool_query"
+
+        # 常规前缀替换
+        for old, new in mapping_prefix:
+            if nk.startswith(old):
+                nk = new + nk[len(old):]
+                break
+
+        new_sd[nk] = v
+
+    return new_sd
 
 
 def load_model_file(path, device):
     ckpt = torch.load(path, map_location=device, weights_only=False)
     cfg = ckpt.get('config', {})
+
     model = CBAMCNNTransformer(
         input_dim=ckpt['input_dim'],
         embed_dim=128,
@@ -613,7 +654,31 @@ def load_model_file(path, device):
         num_layers=cfg.get('num_layers', 4),
         dropout=cfg.get('dropout', 0.3)
     ).to(device)
-    model.load_state_dict(ckpt['model_state_dict'])
+
+    sd = ckpt['model_state_dict']
+
+
+    legacy_markers = ("cnn1.", "cnn2.", "query", "pos_enc.", "transformer.", "attn_pool.", "fc.", "cbam1.ca.", "cbam1.sa.")
+    is_legacy = any(any(k.startswith(m) or k == m for m in legacy_markers) for k in sd.keys())
+
+    if is_legacy:
+        sd = remap_legacy_state_dict(sd)
+
+
+    try:
+        model.load_state_dict(sd, strict=True)
+    except RuntimeError as e:
+
+        missing, unexpected = model.load_state_dict(sd, strict=False)
+        print("[WARN] Loaded with strict=False")
+        print("Missing keys:", missing)
+        print("Unexpected keys:", unexpected)
+        raise RuntimeError(
+            "模型参数仍无法完全匹配：很可能结构(层数/维度)不一致。\n"
+            "建议重新训练并保存模型。\n\n"
+            f"原始错误：{str(e)}"
+        )
+
     return model, ckpt
 
 
