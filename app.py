@@ -521,6 +521,25 @@ def load_model_from_path(model_path, device):
     model.load_state_dict(checkpoint['model_state_dict'])
 
     return model, checkpoint
+import random
+import copy
+
+def set_seed(seed: int = 42):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
+def seed_worker(worker_id: int):
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
 
 
 # ============================================================================
@@ -928,81 +947,147 @@ def categorize_mechanisms(names, importance):
 # Training & Prediction Functions
 # ============================================================================
 def train_model(train_features, train_labels, config, progress_cb=None):
+
+    seed = int(config.get('seed', 42))
+    set_seed(seed)
+
     device = get_device()
 
     scaler_X = StandardScaler()
     scaler_y = StandardScaler()
 
+    # 标准化
     X_scaled = scaler_X.fit_transform(train_features.values)
     y_scaled = scaler_y.fit_transform(train_labels.values.reshape(-1, 1)).flatten()
 
     dataset = BatteryDataset(
         pd.DataFrame(X_scaled, columns=train_features.columns),
         pd.Series(y_scaled),
-        seq_length=config['seq_length']
+        seq_length=int(config['seq_length'])
     )
 
-    val_size = int(0.1 * len(dataset))
-    train_size = len(dataset) - val_size
-    train_ds, val_ds = torch.utils.data.random_split(dataset, [train_size, val_size])
+    val_ratio = float(config.get('val_ratio', 0.1))
+    val_size = int(val_ratio * len(dataset))
+    val_size = max(1, val_size)  # 至少 1
+    train_size = max(1, len(dataset) - val_size)
 
-    train_loader = DataLoader(train_ds, batch_size=config['batch_size'], shuffle=True, drop_last=True)
-    val_loader = DataLoader(val_ds, batch_size=config['batch_size'], shuffle=False)
+    g = torch.Generator().manual_seed(seed)
+    train_ds, val_ds = torch.utils.data.random_split(dataset, [train_size, val_size], generator=g)
+
+    batch_size = int(config['batch_size'])
+    num_workers = int(config.get('num_workers', 0))
+
+    train_loader = DataLoader(
+        train_ds, batch_size=batch_size, shuffle=True, drop_last=True,
+        num_workers=num_workers, worker_init_fn=seed_worker if num_workers > 0 else None,
+        generator=g if num_workers == 0 else None
+    )
+    val_loader = DataLoader(
+        val_ds, batch_size=batch_size, shuffle=False,
+        num_workers=num_workers, worker_init_fn=seed_worker if num_workers > 0 else None
+    )
 
     model = CBAMCNNTransformer(
         input_dim=train_features.shape[1],
         embed_dim=128,
-        num_heads=config.get('num_heads', 8),
-        num_layers=config.get('num_layers', 4),
-        dropout=config.get('dropout', 0.3)
+        num_heads=int(config.get('num_heads', 8)),
+        num_layers=int(config.get('num_layers', 4)),
+        dropout=float(config.get('dropout', 0.3))
     ).to(device)
 
     criterion = nn.MSELoss()
-    optimizer = optim.AdamW(model.parameters(), lr=config['learning_rate'], weight_decay=1e-5)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
+    optimizer = optim.AdamW(model.parameters(), lr=float(config['learning_rate']), weight_decay=1e-5)
 
-    train_losses, val_losses = [], []
-    best_val_loss = float('inf')
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.5, patience=5, min_lr=1e-6
+    )
+
+    num_epochs = int(config['num_epochs'])
+    es_patience = int(config.get('patience', 10))
+
+    train_losses, val_losses, val_r2_list = [], [], []
+    best_val_r2 = float('-inf')
     best_state = None
+    no_improve = 0
 
-    for epoch in range(config['num_epochs']):
+    for epoch in range(num_epochs):
+        # ----------------- train -----------------
         model.train()
-        train_loss = 0
+        total_loss = 0.0
+        total_n = 0
+
         for X, y in train_loader:
             X, y = X.to(device), y.to(device)
-            optimizer.zero_grad()
+
+            optimizer.zero_grad(set_to_none=True)
             out = model(X)
             loss = criterion(out, y)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
-            train_loss += loss.item()
 
-        train_loss /= len(train_loader)
+            bs = X.size(0)
+            total_loss += loss.item() * bs
+            total_n += bs
+
+        train_loss = total_loss / max(1, total_n)
         train_losses.append(train_loss)
 
+        # ----------------- val -----------------
         model.eval()
-        val_loss = 0
+        total_vloss = 0.0
+        total_vn = 0
+        y_true_val, y_pred_val = [], []
+
         with torch.no_grad():
             for X, y in val_loader:
                 X, y = X.to(device), y.to(device)
-                loss = criterion(model(X), y)
-                val_loss += loss.item()
+                out = model(X)
 
-        val_loss /= len(val_loader)
+                vloss = criterion(out, y)
+                bs = X.size(0)
+                total_vloss += vloss.item() * bs
+                total_vn += bs
+
+                y_true_val.extend(y.detach().cpu().numpy().tolist())
+                y_pred_val.extend(out.detach().cpu().numpy().tolist())
+
+        val_loss = total_vloss / max(1, total_vn)
         val_losses.append(val_loss)
+
+        # 对齐代码1：用 R2 作为 best 选择标准（在“标准化空间”计算即可）
+        val_r2 = r2_score(y_true_val, y_pred_val) if len(y_true_val) > 1 else 0.0
+        val_r2_list.append(val_r2)
+
         scheduler.step(val_loss)
 
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            best_state = model.state_dict().copy()
+        # ----------------- best / early stop -----------------
+        if val_r2 > best_val_r2:
+            best_val_r2 = val_r2
+            best_state = copy.deepcopy(model.state_dict())
+            no_improve = 0
+        else:
+            no_improve += 1
 
         if progress_cb:
-            progress_cb(epoch + 1, config['num_epochs'], train_loss, val_loss)
+            progress_cb(epoch + 1, num_epochs, train_loss, val_loss)
 
-    model.load_state_dict(best_state)
+        if no_improve >= es_patience:
+            break
+
+    if best_state is not None:
+        model.load_state_dict(best_state)
+
     return model, scaler_X, scaler_y, train_losses, val_losses, train_features.columns.tolist()
 
+def get_rated_capacity(ckpt: dict, user_value: float) -> float:
+
+    if isinstance(ckpt, dict) and 'rated_capacity' in ckpt and ckpt['rated_capacity']:
+        try:
+            return float(ckpt['rated_capacity'])
+        except:
+            pass
+    return float(user_value)
 
 def predict_with_model(model, test_features, test_labels, scaler_X, scaler_y, seq_length, device):
     X_scaled = scaler_X.transform(test_features.values)
@@ -1095,34 +1180,47 @@ def render_nav(lang):
 # Results Section
 # ============================================================================
 def render_results(results, selected_cycle, lang):
-    preds = results['predictions']
-    acts = results['actuals']
-    importance = results['feature_importance']
-    shap_vals = results['shap_values']
+    preds = np.array(results['predictions'], dtype=float)   # 0~1
+    acts = np.array(results['actuals'], dtype=float)        # 0~1
+    importance = np.array(results['feature_importance'], dtype=float)
+    shap_vals = np.array(results['shap_values'], dtype=float)
     names = results['feature_names']
     feat_scaled = results['features_scaled']
 
+    if len(preds) == 0 or len(acts) == 0:
+        st.error("No prediction results to display.")
+        return
+
+    # 防止越界
+    selected_cycle = int(np.clip(selected_cycle, 0, len(preds) - 1))
+
+    # =========================
     # SOH Display and Metrics
+    # =========================
     col1, col2, col3, col4 = st.columns([1.5, 0.8, 0.8, 0.8])
 
     with col1:
-        current_soh = preds[selected_cycle]
-        actual_soh = acts[selected_cycle]
-        status_text, status_class = get_status(current_soh, lang)
+        current_soh_pct = preds[selected_cycle] * 100.0
+        actual_soh_pct = acts[selected_cycle] * 100.0
+        status_text, status_class = get_status(current_soh_pct, lang)
 
         st.markdown(f"""
         <div class="soh-display">
-            <div class="soh-value">{current_soh:.1f}%</div>
+            <div class="soh-value">{current_soh_pct:.1f}%</div>
             <div class="soh-label">{T('current_soh', lang)}</div>
             <div style="font-size: 0.8rem; opacity: 0.7; margin-top: 0.5rem;">
-                Cycle {selected_cycle + 1} | Actual: {actual_soh:.1f}%
+                Cycle {selected_cycle + 1} | Actual: {actual_soh_pct:.1f}%
             </div>
             <span class="status-badge {status_class}">{status_text}</span>
         </div>
         """, unsafe_allow_html=True)
 
+
+    preds_pct = preds * 100.0
+    acts_pct = acts * 100.0
+
     with col2:
-        mae = mean_absolute_error(acts, preds)
+        mae = mean_absolute_error(acts_pct, preds_pct)
         st.markdown(f"""
         <div class="metric-card">
             <div class="metric-value">{mae:.3f}%</div>
@@ -1131,7 +1229,7 @@ def render_results(results, selected_cycle, lang):
         """, unsafe_allow_html=True)
 
     with col3:
-        rmse = np.sqrt(mean_squared_error(acts, preds))
+        rmse = np.sqrt(mean_squared_error(acts_pct, preds_pct))
         st.markdown(f"""
         <div class="metric-card">
             <div class="metric-value">{rmse:.3f}%</div>
@@ -1140,7 +1238,7 @@ def render_results(results, selected_cycle, lang):
         """, unsafe_allow_html=True)
 
     with col4:
-        r2 = r2_score(acts, preds)
+        r2 = r2_score(acts_pct, preds_pct)
         st.markdown(f"""
         <div class="metric-card">
             <div class="metric-value">{r2:.4f}</div>
@@ -1148,13 +1246,17 @@ def render_results(results, selected_cycle, lang):
         </div>
         """, unsafe_allow_html=True)
 
-    # Prediction Trend
+    # =========================
+    # Prediction Trend (用百分数画图)
+    # =========================
     st.markdown(f'<div class="section-header">{T("prediction_trend", lang)}</div>', unsafe_allow_html=True)
-    fig_trend = plot_prediction_trend(acts, preds, selected_cycle)
+    fig_trend = plot_prediction_trend(acts_pct, preds_pct, selected_cycle)
     st.pyplot(fig_trend)
-    plt.close()
+    plt.close(fig_trend)
 
+    # =========================
     # SHAP Analysis
+    # =========================
     st.markdown(f'<div class="section-header">{T("shap_title", lang)}</div>', unsafe_allow_html=True)
 
     col1, col2 = st.columns(2)
@@ -1162,31 +1264,35 @@ def render_results(results, selected_cycle, lang):
     with col1:
         fig1 = plot_feature_importance(names, importance)
         st.pyplot(fig1)
-        plt.close()
+        plt.close(fig1)
 
     with col2:
-        cycle_shap = shap_vals[min(selected_cycle, len(shap_vals) - 1)]
-        base_val = np.mean(acts) / 100
+        # 取对应cycle的shap（若shap样本数不足则取最后一个）
+        idx = min(selected_cycle, shap_vals.shape[0] - 1) if shap_vals.ndim == 2 and shap_vals.shape[0] > 0 else 0
+        cycle_shap = shap_vals[idx] if shap_vals.ndim == 2 else np.zeros(len(names))
+
+        # base_val 用 0~1（不再 /100）
+        base_val = float(np.mean(acts))  # 0~1
         fig2 = plot_waterfall(names, cycle_shap, base_val, f"(Cycle {selected_cycle + 1})")
         st.pyplot(fig2)
-        plt.close()
+        plt.close(fig2)
 
     # Beeswarm and Mechanism
     col1, col2 = st.columns(2)
 
     with col1:
-        fig3 = plot_beeswarm(names, shap_vals, feat_scaled[:len(shap_vals)])
+        # beeswarm 仍用 shap_vals 与 feat_scaled（可保持原逻辑）
+        fig3 = plot_beeswarm(names, shap_vals, feat_scaled[:len(shap_vals)] if feat_scaled is not None else None)
         st.pyplot(fig3)
-        plt.close()
+        plt.close(fig3)
 
     with col2:
         st.markdown(f'<div class="section-header">{T("mechanism_analysis", lang)}</div>', unsafe_allow_html=True)
 
         mech_names, mech_contrib = categorize_mechanisms(names, importance)
-
         fig4 = plot_radar(mech_names, mech_contrib)
         st.pyplot(fig4)
-        plt.close()
+        plt.close(fig4)
 
         for name, contrib in zip(mech_names, mech_contrib):
             st.markdown(f"""
@@ -1201,13 +1307,15 @@ def render_results(results, selected_cycle, lang):
             </div>
             """, unsafe_allow_html=True)
 
-    # Download
+    # =========================
+    # Download (输出百分数)
+    # =========================
     st.markdown("<br>", unsafe_allow_html=True)
     results_df = pd.DataFrame({
-        'Cycle': range(1, len(preds) + 1),
-        'Actual_SOH': acts,
-        'Predicted_SOH': preds,
-        'Error': acts - preds
+        'Cycle': np.arange(1, len(preds) + 1),
+        'Actual_SOH_percent': acts_pct,
+        'Predicted_SOH_percent': preds_pct,
+        'Error_percent': (acts_pct - preds_pct),
     })
 
     csv = results_df.to_csv(index=False)
@@ -1217,7 +1325,6 @@ def render_results(results, selected_cycle, lang):
         file_name="soh_predictions.csv",
         mime="text/csv"
     )
-
 
 # ============================================================================
 # Page: Demo
