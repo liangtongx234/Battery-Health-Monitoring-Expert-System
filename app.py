@@ -502,69 +502,7 @@ class CBAMCNNTransformer(nn.Module):
         return out.squeeze(1)
 
 
-def remap_legacy_state_dict(state_dict: dict) -> dict:
-    mapping_prefix = [
-        ("cnn1.", "cnn_block1."),
-        ("cnn2.", "cnn_block2."),
-        ("pos_enc.", "positional_encoding."),
-        ("transformer.", "transformer_encoder."),
-        ("attn_pool.", "attention_pool."),
-        ("fc.", "fc_out."),
-        ("cbam1.ca.", "cbam1.channel_attention."),
-        ("cbam1.sa.", "cbam1.spatial_attention."),
-        ("cbam2.ca.", "cbam2.channel_attention."),
-        ("cbam2.sa.", "cbam2.spatial_attention."),
-    ]
 
-    new_sd = {}
-    for k, v in state_dict.items():
-        nk = k
-
-        if nk == "query":          # 旧版
-            nk = "pool_query"      # 新版
-
-        for old, new in mapping_prefix:
-            if nk.startswith(old):
-                nk = new + nk[len(old):]
-                break
-
-        new_sd[nk] = v
-    return new_sd
-
-
-def infer_input_dim_from_state_dict(sd: dict) -> int | None:
-    # 旧命名
-    if "cnn1.0.weight" in sd:
-        return int(sd["cnn1.0.weight"].shape[1])
-    # 新命名
-    if "cnn_block1.0.weight" in sd:
-        return int(sd["cnn_block1.0.weight"].shape[1])
-    return None
-
-
-def load_model_from_path(model_path, device):
-    checkpoint = torch.load(model_path, map_location=device, weights_only=False)
-
-    input_dim = checkpoint['input_dim']
-    config = checkpoint.get('config', {})
-
-    model = CBAMCNNTransformer(
-        input_dim=input_dim,
-        embed_dim=128,
-        num_heads=config.get('num_heads', 8),
-        num_layers=config.get('num_layers', 4),
-        dropout=config.get('dropout', 0.3)
-    ).to(device)
-
-    sd = checkpoint['model_state_dict']
-
-    legacy_markers = ("cnn1.", "cnn2.", "query", "pos_enc.", "transformer.", "attn_pool.", "fc.", "cbam1.ca.", "cbam1.sa.")
-    is_legacy = any(any(k.startswith(m) or k == m for m in legacy_markers) for k in sd.keys())
-    if is_legacy:
-        sd = remap_legacy_state_dict(sd)
-
-    model.load_state_dict(sd, strict=True)
-    return model, checkpoint
 
 import random
 import copy
@@ -647,11 +585,9 @@ def read_csv(file_or_path):
                 continue
     return None
 def remap_legacy_state_dict(state_dict: dict) -> dict:
-
     mapping_prefix = [
         ("cnn1.", "cnn_block1."),
         ("cnn2.", "cnn_block2."),
-        ("query", "pool_query"),
         ("pos_enc.", "positional_encoding."),
         ("transformer.", "transformer_encoder."),
         ("attn_pool.", "attention_pool."),
@@ -754,11 +690,11 @@ def load_model_file(path, device):
         if "feature_names" in ckpt and isinstance(ckpt["feature_names"], (list, tuple)):
             input_dim = len(ckpt["feature_names"])
         else:
-    
+
             input_dim = _infer_input_dim_from_state_dict(sd)
 
     if input_dim is None:
-        raise KeyError("input_dim")  
+        raise KeyError("input_dim")
 
     cfg = ckpt.get("config", {})
     num_heads = int(cfg.get("num_heads", 8))
@@ -779,9 +715,9 @@ def load_model_file(path, device):
     ckpt["config"] = cfg
 
     if "seq_length" not in ckpt:
-        ckpt["seq_length"] = 12  
+        ckpt["seq_length"] = 12
     if "rated_capacity" not in ckpt:
-        ckpt["rated_capacity"] = 2.0  
+        ckpt["rated_capacity"] = 2.0
 
 
     if "scaler_X" not in ckpt:
@@ -1783,114 +1719,73 @@ def page_train(lang):
 # ============================================================================
 # Page: Predict
 # ============================================================================
-def page_predict(lang):
-    st.markdown(f'<div class="section-header">{T("predict_title", lang)}</div>', unsafe_allow_html=True)
+def page_demo(lang):
+    st.markdown(f"""
+    <div class="info-banner">
+        <h3>{T('demo_title', lang)}</h3>
+        <p>{T('demo_desc', lang)}</p>
+    </div>
+    """, unsafe_allow_html=True)
 
-    col1, col2 = st.columns([2, 1])
+    data_files = get_data_files()
+    model_files = get_model_files()
 
-    with col1:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-
-        data_source = st.radio(
-            T('data_source', lang),
-            [T('load_from_repo', lang), T('upload_custom', lang)],
-            horizontal=True,
-            key='predict_data_source'
-        )
-
-        test_file = None
-
-        if data_source == T('load_from_repo', lang):
-            data_files = get_data_files()
+    if data_files or model_files:
+        col1, col2 = st.columns(2)
+        with col1:
             if data_files:
-                test_file = st.selectbox(
-                    T('upload_test', lang),
-                    data_files,
-                    format_func=lambda x: os.path.basename(x),
-                    key='predict_data_select'
-                )
-            else:
-                st.warning(T('no_data', lang))
-        else:
-            test_file = st.file_uploader(T('upload_test', lang), type=['csv'], key='predict_upload')
-
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    with col2:
-        st.markdown(f'<div class="card"><div style="font-weight: 600; margin-bottom: 1rem;">{T("config", lang)}</div>',
-                    unsafe_allow_html=True)
-
-        model_source = st.radio(
-            T('model_source', lang),
-            [T('load_from_repo', lang), T('upload_custom', lang)],
-            horizontal=True,
-            key='predict_model_source'
-        )
-
-        selected_model = None
-        uploaded_model = None
-
-        if model_source == T('load_from_repo', lang):
-            model_files = get_model_files()
+                st.info(f"Found {len(data_files)} data file(s)")
+        with col2:
             if model_files:
-                selected_model = st.selectbox(
-                    T('select_model', lang),
-                    model_files,
-                    format_func=lambda x: os.path.basename(x)
-                )
-            else:
-                st.warning(T('no_model', lang))
-        else:
-            uploaded_model = st.file_uploader(T('upload_model', lang), type=['pth'])
+                st.info(f"Found {len(model_files)} model(s)")
 
-        target_col = st.text_input(T('target_col', lang), value='capacity', key='predict_target')
-        rated_cap = st.number_input(T('rated_capacity', lang), value=2.0, min_value=0.1, max_value=1000.0, step=0.1,
-                                    key='predict_cap')
-
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    if st.button(T('start_predict', lang), use_container_width=True):
-        if not test_file:
-            st.error("Please select test data")
-        elif model_source == T('load_from_repo', lang) and not selected_model:
-            st.error("Please select a model")
-        elif model_source == T('upload_custom', lang) and not uploaded_model:
-            st.error("Please upload a model")
-        else:
+    if 'demo_results' not in st.session_state:
+        if data_files and model_files:
             try:
-                with st.spinner(T('processing', lang)):
-                    device = get_device()
+                device = get_device()
+                model, ckpt = load_model_file(model_files[0], device)
 
-                    if model_source == T('load_from_repo', lang):
-                        model, ckpt = load_model_file(selected_model, device)
-                    else:
-                        ckpt = torch.load(uploaded_model, map_location=device, weights_only=False)
-                        cfg = ckpt.get('config', {})
-                        model = CBAMCNNTransformer(
-                            input_dim=ckpt['input_dim'],
-                            embed_dim=128,
-                            num_heads=cfg.get('num_heads', 8),
-                            num_layers=cfg.get('num_layers', 4),
-                            dropout=cfg.get('dropout', 0.3)
-                        ).to(device)
-                        model.load_state_dict(ckpt['model_state_dict'])
+                scaler_X = ckpt['scaler_X']
+                scaler_y = ckpt['scaler_y']
+                seq_length = int(ckpt.get('seq_length', 12))
+                rated_cap = float(ckpt.get('rated_capacity', 2.0))
+                input_dim = int(ckpt.get("input_dim", 0))
 
-                    scaler_X = ckpt['scaler_X']
-                    scaler_y = ckpt['scaler_y']
-                    feature_names = ckpt['feature_names']
-                    seq_length = ckpt['seq_length']
+                df = read_csv(data_files[0])
+                if df is not None:
+                    target_col = 'capacity'
+                    if target_col in df.columns:
+                        df['SOH'] = df[target_col] / rated_cap
 
-                    test_df = read_csv(test_file)
-                    if test_df is not None:
-                        test_df['SOH'] = test_df[target_col] / rated_cap
-
+                        # drop无用列
                         drops = ['voltage mean', 'voltage std', 'current mean', 'current std']
-                        avail_drops = [c for c in drops if c in test_df.columns]
+                        avail_drops = [c for c in drops if c in df.columns]
                         if avail_drops:
-                            test_df = test_df.drop(avail_drops, axis=1)
+                            df = df.drop(avail_drops, axis=1)
 
-                        test_features = test_df[feature_names].copy()
-                        test_labels = test_df['SOH']
+                        # ====== ✅ 关键：特征列选择（兼容legacy f0..fN） ======
+                        feature_names = ckpt.get('feature_names', None)
+
+                        exclude = {target_col, "SOH"}
+                        cand = [c for c in df.columns
+                                if c not in exclude and pd.api.types.is_numeric_dtype(df[c])]
+
+                        use_ckpt_cols = isinstance(feature_names, (list, tuple)) and all((c in df.columns) for c in feature_names)
+
+                        if not use_ckpt_cols:
+                            if input_dim <= 0:
+                                st.warning("Demo: 模型缺少 input_dim，回退到生成demo数据。")
+                                raise RuntimeError("demo missing input_dim")
+                            if len(cand) < input_dim:
+                                st.warning("Demo: CSV数值列不足，回退到生成demo数据。")
+                                raise RuntimeError("demo not enough cols")
+                            feature_names = cand[:input_dim]
+                            ckpt["feature_names"] = feature_names
+                            st.warning(f"Demo: 旧模型未保存 feature_names，已从CSV自动选择 {len(feature_names)} 列用于预测。")
+
+                        test_features = df[feature_names].copy()
+                        test_labels = df['SOH']
+
                         test_features = test_features.replace([np.inf, -np.inf], np.nan).fillna(0)
                         test_labels = test_labels.replace([np.inf, -np.inf], np.nan).fillna(0)
 
@@ -1902,26 +1797,42 @@ def page_predict(lang):
                             model, dataset, scaler_X, scaler_y, device
                         )
 
-                        st.session_state.predict_results = {
+                        st.session_state.demo_results = {
                             'predictions': preds,
                             'actuals': acts,
                             'feature_importance': importance,
                             'shap_values': shap_vals,
                             'feature_names': feature_names,
                             'features_scaled': feat_scaled,
+                            'df': df,
+                            'source': 'repo'
                         }
-
-                        st.success(T('prediction_complete', lang))
-
             except Exception as e:
-                st.error(f"Error: {str(e)}")
-                import traceback
-                st.code(traceback.format_exc())
+                st.warning(f"Could not load repository data: {str(e)}")
 
-    if 'predict_results' in st.session_state and st.session_state.predict_results:
-        results = st.session_state.predict_results
-        selected = st.slider("Select Cycle", 0, len(results['predictions']) - 1, 0, key='predict_cycle')
-        render_results(results, selected, lang)
+        if 'demo_results' not in st.session_state:
+            st.session_state.demo_results = generate_demo_results()
+
+    results = st.session_state.demo_results
+
+    if results.get('source') == 'repo':
+        st.success(T('using_repo', lang))
+    else:
+        st.info(T('using_demo', lang))
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        selected_cycle = st.slider(
+            T('select_cycle', lang),
+            min_value=0,
+            max_value=len(results['predictions']) - 1,
+            value=st.session_state.get('demo_cycle', 0),
+            key='demo_cycle_slider'
+        )
+        st.session_state.demo_cycle = selected_cycle
+
+    render_results(results, selected_cycle, lang)
+
 
 
 # ============================================================================
