@@ -1479,25 +1479,53 @@ def page_demo(lang):
             if model_files:
                 st.info(f"Found {len(model_files)} model(s)")
 
-    # Load demo data
     if 'demo_results' not in st.session_state:
         if data_files and model_files:
             try:
                 device = get_device()
                 model, ckpt = load_model_file(model_files[0], device)
+
                 scaler_X = ckpt['scaler_X']
                 scaler_y = ckpt['scaler_y']
-                feature_names = ckpt['feature_names']
-                seq_length = ckpt['seq_length']
-                rated_cap = ckpt.get('rated_capacity', 2.0)
+                seq_length = int(ckpt.get('seq_length', 12))
+                rated_cap = float(ckpt.get('rated_capacity', 2.0))
+                input_dim = int(ckpt.get("input_dim", 0))
 
                 df = read_csv(data_files[0])
                 if df is not None:
                     target_col = 'capacity'
                     if target_col in df.columns:
                         df['SOH'] = df[target_col] / rated_cap
+
+                        # drop无用列
+                        drops = ['voltage mean', 'voltage std', 'current mean', 'current std']
+                        avail_drops = [c for c in drops if c in df.columns]
+                        if avail_drops:
+                            df = df.drop(avail_drops, axis=1)
+
+                        # ====== ✅ 关键：特征列选择（兼容legacy f0..fN） ======
+                        feature_names = ckpt.get('feature_names', None)
+
+                        exclude = {target_col, "SOH"}
+                        cand = [c for c in df.columns
+                                if c not in exclude and pd.api.types.is_numeric_dtype(df[c])]
+
+                        use_ckpt_cols = isinstance(feature_names, (list, tuple)) and all((c in df.columns) for c in feature_names)
+
+                        if not use_ckpt_cols:
+                            if input_dim <= 0:
+                                st.warning("Demo: 模型缺少 input_dim，回退到生成demo数据。")
+                                raise RuntimeError("demo missing input_dim")
+                            if len(cand) < input_dim:
+                                st.warning("Demo: CSV数值列不足，回退到生成demo数据。")
+                                raise RuntimeError("demo not enough cols")
+                            feature_names = cand[:input_dim]
+                            ckpt["feature_names"] = feature_names
+                            st.warning(f"Demo: 旧模型未保存 feature_names，已从CSV自动选择 {len(feature_names)} 列用于预测。")
+
                         test_features = df[feature_names].copy()
                         test_labels = df['SOH']
+
                         test_features = test_features.replace([np.inf, -np.inf], np.nan).fillna(0)
                         test_labels = test_labels.replace([np.inf, -np.inf], np.nan).fillna(0)
 
@@ -1532,7 +1560,6 @@ def page_demo(lang):
     else:
         st.info(T('using_demo', lang))
 
-    # Cycle selector
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         selected_cycle = st.slider(
@@ -1545,6 +1572,7 @@ def page_demo(lang):
         st.session_state.demo_cycle = selected_cycle
 
     render_results(results, selected_cycle, lang)
+
 
 
 # ============================================================================
@@ -1719,119 +1747,213 @@ def page_train(lang):
 # ============================================================================
 # Page: Predict
 # ============================================================================
-def page_demo(lang):
-    st.markdown(f"""
-    <div class="info-banner">
-        <h3>{T('demo_title', lang)}</h3>
-        <p>{T('demo_desc', lang)}</p>
-    </div>
-    """, unsafe_allow_html=True)
+def page_predict(lang):
+    st.markdown(f'<div class="section-header">{T("predict_title", lang)}</div>', unsafe_allow_html=True)
 
-    data_files = get_data_files()
-    model_files = get_model_files()
+    col1, col2 = st.columns([2, 1])
 
-    if data_files or model_files:
-        col1, col2 = st.columns(2)
-        with col1:
-            if data_files:
-                st.info(f"Found {len(data_files)} data file(s)")
-        with col2:
-            if model_files:
-                st.info(f"Found {len(model_files)} model(s)")
+    with col1:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
 
-    if 'demo_results' not in st.session_state:
-        if data_files and model_files:
-            try:
-                device = get_device()
-                model, ckpt = load_model_file(model_files[0], device)
-
-                scaler_X = ckpt['scaler_X']
-                scaler_y = ckpt['scaler_y']
-                seq_length = int(ckpt.get('seq_length', 12))
-                rated_cap = float(ckpt.get('rated_capacity', 2.0))
-                input_dim = int(ckpt.get("input_dim", 0))
-
-                df = read_csv(data_files[0])
-                if df is not None:
-                    target_col = 'capacity'
-                    if target_col in df.columns:
-                        df['SOH'] = df[target_col] / rated_cap
-
-                        # drop无用列
-                        drops = ['voltage mean', 'voltage std', 'current mean', 'current std']
-                        avail_drops = [c for c in drops if c in df.columns]
-                        if avail_drops:
-                            df = df.drop(avail_drops, axis=1)
-
-                        # ====== ✅ 关键：特征列选择（兼容legacy f0..fN） ======
-                        feature_names = ckpt.get('feature_names', None)
-
-                        exclude = {target_col, "SOH"}
-                        cand = [c for c in df.columns
-                                if c not in exclude and pd.api.types.is_numeric_dtype(df[c])]
-
-                        use_ckpt_cols = isinstance(feature_names, (list, tuple)) and all((c in df.columns) for c in feature_names)
-
-                        if not use_ckpt_cols:
-                            if input_dim <= 0:
-                                st.warning("Demo: 模型缺少 input_dim，回退到生成demo数据。")
-                                raise RuntimeError("demo missing input_dim")
-                            if len(cand) < input_dim:
-                                st.warning("Demo: CSV数值列不足，回退到生成demo数据。")
-                                raise RuntimeError("demo not enough cols")
-                            feature_names = cand[:input_dim]
-                            ckpt["feature_names"] = feature_names
-                            st.warning(f"Demo: 旧模型未保存 feature_names，已从CSV自动选择 {len(feature_names)} 列用于预测。")
-
-                        test_features = df[feature_names].copy()
-                        test_labels = df['SOH']
-
-                        test_features = test_features.replace([np.inf, -np.inf], np.nan).fillna(0)
-                        test_labels = test_labels.replace([np.inf, -np.inf], np.nan).fillna(0)
-
-                        preds, acts, feat_scaled, dataset = predict_with_model(
-                            model, test_features, test_labels, scaler_X, scaler_y, seq_length, device
-                        )
-
-                        importance, shap_vals, _, _ = calculate_shap_values(
-                            model, dataset, scaler_X, scaler_y, device
-                        )
-
-                        st.session_state.demo_results = {
-                            'predictions': preds,
-                            'actuals': acts,
-                            'feature_importance': importance,
-                            'shap_values': shap_vals,
-                            'feature_names': feature_names,
-                            'features_scaled': feat_scaled,
-                            'df': df,
-                            'source': 'repo'
-                        }
-            except Exception as e:
-                st.warning(f"Could not load repository data: {str(e)}")
-
-        if 'demo_results' not in st.session_state:
-            st.session_state.demo_results = generate_demo_results()
-
-    results = st.session_state.demo_results
-
-    if results.get('source') == 'repo':
-        st.success(T('using_repo', lang))
-    else:
-        st.info(T('using_demo', lang))
-
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        selected_cycle = st.slider(
-            T('select_cycle', lang),
-            min_value=0,
-            max_value=len(results['predictions']) - 1,
-            value=st.session_state.get('demo_cycle', 0),
-            key='demo_cycle_slider'
+        data_source = st.radio(
+            T('data_source', lang),
+            [T('load_from_repo', lang), T('upload_custom', lang)],
+            horizontal=True,
+            key='predict_data_source'
         )
-        st.session_state.demo_cycle = selected_cycle
 
-    render_results(results, selected_cycle, lang)
+        test_file = None
+
+        if data_source == T('load_from_repo', lang):
+            data_files = get_data_files()
+            if data_files:
+                test_file = st.selectbox(
+                    T('upload_test', lang),
+                    data_files,
+                    format_func=lambda x: os.path.basename(x),
+                    key='predict_data_select'
+                )
+            else:
+                st.warning(T('no_data', lang))
+        else:
+            test_file = st.file_uploader(T('upload_test', lang), type=['csv'], key='predict_upload')
+
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    with col2:
+        st.markdown(
+            f'<div class="card"><div style="font-weight: 600; margin-bottom: 1rem;">{T("config", lang)}</div>',
+            unsafe_allow_html=True
+        )
+
+        model_source = st.radio(
+            T('model_source', lang),
+            [T('load_from_repo', lang), T('upload_custom', lang)],
+            horizontal=True,
+            key='predict_model_source'
+        )
+
+        selected_model = None
+        uploaded_model = None
+
+        if model_source == T('load_from_repo', lang):
+            model_files = get_model_files()
+            if model_files:
+                selected_model = st.selectbox(
+                    T('select_model', lang),
+                    model_files,
+                    format_func=lambda x: os.path.basename(x)
+                )
+            else:
+                st.warning(T('no_model', lang))
+        else:
+            uploaded_model = st.file_uploader(T('upload_model', lang), type=['pth'])
+
+        target_col = st.text_input(T('target_col', lang), value='capacity', key='predict_target')
+        rated_cap = st.number_input(
+            T('rated_capacity', lang),
+            value=2.0,
+            min_value=0.1,
+            max_value=1000.0,
+            step=0.1,
+            key='predict_cap'
+        )
+
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    if st.button(T('start_predict', lang), use_container_width=True):
+        if not test_file:
+            st.error("Please select test data")
+        elif model_source == T('load_from_repo', lang) and not selected_model:
+            st.error("Please select a model")
+        elif model_source == T('upload_custom', lang) and not uploaded_model:
+            st.error("Please upload a model")
+        else:
+            try:
+                with st.spinner(T('processing', lang)):
+                    device = get_device()
+
+                    # ====== load model ======
+                    if model_source == T('load_from_repo', lang):
+                        model, ckpt = load_model_file(selected_model, device)
+                    else:
+                        ckpt = torch.load(uploaded_model, map_location=device, weights_only=False)
+
+                        # 兼容：如果上传的是纯state_dict
+                        if "model_state_dict" not in ckpt:
+                            ckpt = {"model_state_dict": ckpt}
+
+                        cfg = ckpt.get('config', {})
+                        sd = ckpt.get("model_state_dict", ckpt)
+
+                        # 尝试从sd推input_dim
+                        input_dim = ckpt.get("input_dim", None)
+                        if input_dim is None:
+                            input_dim = _infer_input_dim_from_state_dict(sd)
+                        if input_dim is None:
+                            raise RuntimeError("Uploaded model missing input_dim and cannot infer from weights.")
+
+                        model = CBAMCNNTransformer(
+                            input_dim=int(input_dim),
+                            embed_dim=128,
+                            num_heads=int(cfg.get('num_heads', 8)),
+                            num_layers=int(cfg.get('num_layers', 4)),
+                            dropout=float(cfg.get('dropout', 0.3))
+                        ).to(device)
+
+                        sd = _remap_legacy_state_dict(sd)
+                        model.load_state_dict(sd, strict=False)
+
+                        ckpt["input_dim"] = int(input_dim)
+                        ckpt["config"] = cfg
+                        if "seq_length" not in ckpt:
+                            ckpt["seq_length"] = 12
+                        if "rated_capacity" not in ckpt:
+                            ckpt["rated_capacity"] = float(rated_cap)
+                        if "scaler_X" not in ckpt:
+                            ckpt["scaler_X"] = IdentityScaler()
+                        if "scaler_y" not in ckpt:
+                            ckpt["scaler_y"] = IdentityScaler()
+                        if "feature_names" not in ckpt:
+                            ckpt["feature_names"] = [f"f{i}" for i in range(int(input_dim))]
+
+                    scaler_X = ckpt['scaler_X']
+                    scaler_y = ckpt['scaler_y']
+                    seq_length = int(ckpt['seq_length'])
+
+                    # 额定容量：优先用模型保存的
+                    rated_cap_use = get_rated_capacity(ckpt, rated_cap)
+
+                    # ====== read test ======
+                    test_df = read_csv(test_file)
+                    if test_df is None:
+                        st.error("Could not read test CSV.")
+                        return
+
+                    # 构造 SOH（0~1）
+                    test_df['SOH'] = test_df[target_col] / rated_cap_use
+
+                    # drop无用列
+                    drops = ['voltage mean', 'voltage std', 'current mean', 'current std']
+                    avail_drops = [c for c in drops if c in test_df.columns]
+                    if avail_drops:
+                        test_df = test_df.drop(avail_drops, axis=1)
+
+                    # ====== ✅ 关键：特征列选择（兼容legacy f0..fN） ======
+                    feature_names = ckpt.get('feature_names', None)
+                    input_dim = int(ckpt.get("input_dim", 0))
+
+                    exclude = {target_col, "SOH"}
+                    cand = [c for c in test_df.columns
+                            if c not in exclude and pd.api.types.is_numeric_dtype(test_df[c])]
+
+                    use_ckpt_cols = isinstance(feature_names, (list, tuple)) and all((c in test_df.columns) for c in feature_names)
+
+                    if not use_ckpt_cols:
+                        if input_dim <= 0:
+                            st.error("模型缺少 input_dim，无法自动选择特征列。")
+                            return
+                        if len(cand) < input_dim:
+                            st.error(f"CSV数值特征列不足：需要 {input_dim} 列，但只有 {len(cand)} 列。")
+                            return
+                        feature_names = cand[:input_dim]
+                        ckpt["feature_names"] = feature_names
+                        st.warning(f"旧模型未保存 feature_names，已从CSV自动选择 {len(feature_names)} 列用于预测。")
+
+                    test_features = test_df[feature_names].copy()
+                    test_labels = test_df['SOH']
+
+                    test_features = test_features.replace([np.inf, -np.inf], np.nan).fillna(0)
+                    test_labels = test_labels.replace([np.inf, -np.inf], np.nan).fillna(0)
+
+                    preds, acts, feat_scaled, dataset = predict_with_model(
+                        model, test_features, test_labels, scaler_X, scaler_y, seq_length, device
+                    )
+
+                    importance, shap_vals, _, _ = calculate_shap_values(
+                        model, dataset, scaler_X, scaler_y, device
+                    )
+
+                    st.session_state.predict_results = {
+                        'predictions': preds,
+                        'actuals': acts,
+                        'feature_importance': importance,
+                        'shap_values': shap_vals,
+                        'feature_names': feature_names,
+                        'features_scaled': feat_scaled,
+                    }
+
+                    st.success(T('prediction_complete', lang))
+
+            except Exception as e:
+                st.error(f"Error: {str(e)}")
+                import traceback
+                st.code(traceback.format_exc())
+
+    if 'predict_results' in st.session_state and st.session_state.predict_results:
+        results = st.session_state.predict_results
+        selected = st.slider("Select Cycle", 0, len(results['predictions']) - 1, 0, key='predict_cycle')
+        render_results(results, selected, lang)
 
 
 
