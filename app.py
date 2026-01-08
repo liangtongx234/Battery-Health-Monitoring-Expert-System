@@ -68,7 +68,7 @@ COLORS = {
 LANG = {
     "en": {
         "title": "Battery Health Monitoring System",
-        "subtitle": "CBAM-CNN-Transformer with SHAP Interpretability",
+        "subtitle": "CCT-Net(CBAM-CNN-Transformer) with SHAP Interpretability",
         "nav_demo": "Demo",
         "nav_train": "Train",
         "nav_predict": "Predict",
@@ -122,7 +122,7 @@ LANG = {
     },
     "zh": {
         "title": "电池健康监测系统",
-        "subtitle": "基于CBAM-CNN-Transformer的可解释性SOH预测",
+        "subtitle": "基于CCT-Net(CBAM-CNN-Transformer)的可解释性SOH预测",
         "nav_demo": "演示",
         "nav_train": "训练",
         "nav_predict": "预测",
@@ -172,7 +172,7 @@ LANG = {
         "about_text": "使用CBAM-CNN-Transformer和SHAP可解释性的电池SOH预测系统。",
         "config": "配置",
         "using_repo": "使用仓库中的数据和模型",
-        "using_demo": "使用生成的演示数据"
+        "using_demo": "使用生成的演示快速数据"
     }
 }
 
@@ -669,11 +669,11 @@ def T(key, lang):
 
 
 def get_status(soh, lang):
-    if soh >= 90:
+    if soh >= 95:
         return T('excellent', lang), 'status-excellent'
-    elif soh >= 80:
+    elif soh >= 90:
         return T('good', lang), 'status-good'
-    elif soh >= 70:
+    elif soh >= 80:
         return T('moderate', lang), 'status-moderate'
     return T('poor', lang), 'status-poor'
 
