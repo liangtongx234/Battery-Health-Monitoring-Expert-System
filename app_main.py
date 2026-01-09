@@ -1,12 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
-Battery Health Monitoring Expert System
-CBAM-CNN-Transformer with SHAP Interpretability
-GitHub Deployment Ready - Streamlit Cloud Compatible
-
-FIXED VERSION - Resolves KeyError: 'input_dim' for legacy model files
-"""
-
+#导入需要用的库
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -25,6 +18,11 @@ from datetime import datetime
 import glob
 import random
 import copy
+try:
+    import shap
+    SHAP_AVAILABLE = True
+except ImportError:
+    SHAP_AVAILABLE = False
 
 warnings.filterwarnings("ignore")
 
@@ -106,6 +104,7 @@ LANG = {
         "mae": "MAE",
         "rmse": "RMSE",
         "r2": "R2",
+        "mape": "MAPE",
         "model_name": "Model Name",
         "excellent": "Excellent",
         "good": "Good",
@@ -159,6 +158,7 @@ LANG = {
         "download_results": "下载结果",
         "mae": "MAE",
         "rmse": "RMSE",
+        "mape": "MAPE",
         "r2": "R2",
         "model_name": "模型名称",
         "excellent": "优秀",
@@ -614,7 +614,7 @@ def _infer_input_dim_from_state_dict(sd: dict):
     Conv1d.weight shape: [out_channels, in_channels, kernel_size]
     """
     possible_keys = [
-        "cnn_block1.0.weight",  # New naming
+        "cnn_block1.0.weight",  # New naming 
         "cnn1.0.weight",  # Legacy naming
     ]
 
@@ -1094,6 +1094,13 @@ def categorize_mechanisms(names, importance):
 
     return result_names, contrib
 
+def mean_absolute_percentage_error(y_true, y_pred):
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+    mask = y_true != 0
+    if mask.sum() == 0:
+        return 0.0
+    return np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100
 
 # ============================================================================
 # Training & Prediction Functions
@@ -1254,6 +1261,10 @@ def predict_with_model(model, test_features, test_labels, scaler_X, scaler_y, se
 
 
 def calculate_shap_values(model, dataset, scaler_X, scaler_y, device, n_samples=200):
+    """
+    使用 SHAP GradientExplainer 计算真正的SHAP值
+    如果SHAP库不可用，则回退到扰动方法
+    """
     np.random.seed(42)
 
     seq_length = dataset.seq_length
@@ -1261,21 +1272,66 @@ def calculate_shap_values(model, dataset, scaler_X, scaler_y, device, n_samples=
     n_features = len(feature_names)
 
     max_samples = min(n_samples, len(dataset))
-    X_explain = []
 
+    # 准备数据
+    X_data = []
     for idx in range(max_samples):
         seq_X, _ = dataset[idx]
-        X_explain.append(seq_X.numpy().flatten())
+        X_data.append(seq_X.numpy())
+    X_data = np.array(X_data)
 
-    X_explain = np.array(X_explain)
+    # 尝试使用真正的SHAP
+    if SHAP_AVAILABLE:
+        try:
+            model.eval()
 
+            # 转换为tensor
+            background_size = min(50, max_samples)
+            background = torch.tensor(X_data[:background_size], dtype=torch.float32).to(device)
+            test_data = torch.tensor(X_data[:max_samples], dtype=torch.float32).to(device)
+
+            # 创建 GradientExplainer
+            explainer = shap.GradientExplainer(model, background)
+
+            # 计算SHAP值 - 返回形状: (n_samples, seq_length, n_features)
+            shap_values_raw = explainer.shap_values(test_data)
+
+            # 如果返回的是列表（多输出），取第一个
+            if isinstance(shap_values_raw, list):
+                shap_values_raw = shap_values_raw[0]
+
+            # 转换为numpy
+            if torch.is_tensor(shap_values_raw):
+                shap_values_raw = shap_values_raw.cpu().numpy()
+
+            # 对序列维度取平均，得到每个特征的SHAP值: (n_samples, n_features)
+            if len(shap_values_raw.shape) == 3:
+                shap_values_all = shap_values_raw.mean(axis=1)
+            else:
+                shap_values_all = shap_values_raw
+
+            # 计算特征重要性 = |SHAP值|的平均
+            feature_importance = np.abs(shap_values_all).mean(axis=0)
+
+            # 归一化
+            if feature_importance.max() > 0:
+                feature_importance_norm = feature_importance / feature_importance.max()
+            else:
+                feature_importance_norm = feature_importance
+
+            return feature_importance_norm, shap_values_all, X_data, feature_names
+
+        except Exception as e:
+            print(f"SHAP GradientExplainer failed: {e}, falling back to perturbation method")
+
+    # 回退方法：扰动分析
     feature_importance = np.zeros(n_features)
     shap_values_all = np.zeros((max_samples, n_features))
 
     model.eval()
     with torch.no_grad():
         for sample_idx in range(min(50, max_samples)):
-            seq = X_explain[sample_idx].reshape(seq_length, n_features)
+            seq = X_data[sample_idx].reshape(seq_length, n_features)
             seq_tensor = torch.tensor(seq, dtype=torch.float32).unsqueeze(0).to(device)
             base_pred = model(seq_tensor).cpu().numpy()[0]
 
@@ -1299,7 +1355,7 @@ def calculate_shap_values(model, dataset, scaler_X, scaler_y, device, n_samples=
     for sample_idx in range(50, max_samples):
         shap_values_all[sample_idx] = feature_importance_norm * np.random.randn(n_features) * 0.1
 
-    return feature_importance_norm, shap_values_all, X_explain, feature_names
+    return feature_importance_norm, shap_values_all, X_data, feature_names
 
 
 # ============================================================================
@@ -1371,11 +1427,11 @@ def render_results(results, selected_cycle, lang):
         """, unsafe_allow_html=True)
 
     with col4:
-        r2 = r2_score(acts_pct, preds_pct)
+        mape = mean_absolute_percentage_error(acts_pct, preds_pct)
         st.markdown(f"""
         <div class="metric-card">
-            <div class="metric-value">{r2:.4f}</div>
-            <div class="metric-label">{T('r2', lang)}</div>
+            <div class="metric-value">{mape:.2f}%</div>
+            <div class="metric-label">{T('mape', lang)}</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -1510,9 +1566,11 @@ def page_demo(lang):
                             model, test_features, test_labels, scaler_X, scaler_y, seq_length, device
                         )
 
-                        importance, shap_vals, _, _ = calculate_shap_values(
-                            model, dataset, scaler_X, scaler_y, device
-                        )
+                        with st.spinner(
+                                " SHAP分析计算中，请稍等..." if lang == 'zh' else " Computing SHAP analysis, please wait..."):
+                            importance, shap_vals, _, _ = calculate_shap_values(
+                                model, dataset, scaler_X, scaler_y, device
+                            )
 
                         st.session_state.demo_results = {
                             'predictions': preds,
@@ -1696,9 +1754,11 @@ def page_train(lang):
                         model, test_features, test_labels, scaler_X, scaler_y, seq_length, device
                     )
 
-                    importance, shap_vals, _, _ = calculate_shap_values(
-                        model, dataset, scaler_X, scaler_y, device
-                    )
+                    with st.spinner(
+                            " SHAP分析计算中，请稍等..." if lang == 'zh' else " Computing SHAP analysis, please wait..."):
+                        importance, shap_vals, _, _ = calculate_shap_values(
+                            model, dataset, scaler_X, scaler_y, device
+                        )
 
                     st.session_state.train_results = {
                         'predictions': preds,
@@ -1865,9 +1925,11 @@ def page_predict(lang):
                         model, test_features, test_labels, scaler_X, scaler_y, seq_length, device
                     )
 
-                    importance, shap_vals, _, _ = calculate_shap_values(
-                        model, dataset, scaler_X, scaler_y, device
-                    )
+                    with st.spinner(
+                            " SHAP分析计算中，请稍等..." if lang == 'zh' else "🔄 Computing SHAP analysis, please wait..."):
+                        importance, shap_vals, _, _ = calculate_shap_values(
+                            model, dataset, scaler_X, scaler_y, device
+                        )
 
                     st.session_state.predict_results = {
                         'predictions': preds,
@@ -2035,11 +2097,7 @@ def main():
                 st.session_state.lang = 'en' if lang == 'zh' else 'zh'
                 st.rerun()
 
-        with col6:
-            screenshot_label = "Screenshot Mode"
-            if st.button(screenshot_label, key='btn_screenshot', use_container_width=True):
-                st.session_state.screenshot_mode = True
-                st.rerun()
+
 
         st.markdown(f"<hr style='margin: 1rem 0; border: none; border-top: 1px solid {COLORS['border']};'>",
                     unsafe_allow_html=True)
