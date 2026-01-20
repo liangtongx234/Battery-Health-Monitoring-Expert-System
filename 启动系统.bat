@@ -1,9 +1,5 @@
 @echo off
 chcp 65001 >nul
-echo ========================================
-echo    Battery Health Monitoring System
-echo    CBAM-CNN-Transformer with SHAP
-echo ========================================
 echo.
 
 cd /d "%~dp0"
