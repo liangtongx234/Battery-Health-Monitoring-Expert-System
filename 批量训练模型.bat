@@ -1,8 +1,5 @@
 @echo off
 chcp 65001 >nul
-echo ========================================
-echo    Battery Model Batch Training
-echo ========================================
 echo.
 
 cd /d "%~dp0"
@@ -24,10 +21,8 @@ python train_all_models.py
 
 if %errorlevel% neq 0 (
     echo.
-    echo ========================================
     echo   Training failed!
     echo   Please check error messages above.
-    echo ========================================
 )
 
 echo.
