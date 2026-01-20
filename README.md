@@ -6,6 +6,7 @@ An interactive web-based system for lithium-ion battery State-of-Health (SOH) es
 
 ## Overview
 
+
 This repository contains the implementation of the battery health monitoring system described in:
 
 > **Interpretable and Generalizable State-of-Health Estimation for Lithium-Ion Batteries Based on End-of-Charge Features**
@@ -25,7 +26,7 @@ This repository contains the implementation of the battery health monitoring sys
 
 ## System Architecture
 
-![System Interface](figures/system_interface.png)
+![System Interface](figures/system_interface.png)  
 
 The system integrates:
 - End-of-charge "fingerprint window" feature extraction
