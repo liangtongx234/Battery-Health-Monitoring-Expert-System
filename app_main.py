@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-#导入需要用的库
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -26,9 +25,6 @@ except ImportError:
 
 warnings.filterwarnings("ignore")
 
-# ============================================================================
-# Page Configuration
-# ============================================================================
 st.set_page_config(
     page_title="Battery Health Monitor",
     page_icon="battery",
@@ -36,9 +32,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ============================================================================
-# Path Configuration (GitHub Repository Structure)
-# ============================================================================
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__)) if '__file__' in dir() else os.getcwd()
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 MODELS_DIR = os.path.join(BASE_DIR, 'saved_models')
@@ -46,9 +40,6 @@ MODELS_DIR = os.path.join(BASE_DIR, 'saved_models')
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(MODELS_DIR, exist_ok=True)
 
-# ============================================================================
-# Color Palette (Low Saturation Blue Theme)
-# ============================================================================
 COLORS = {
     'primary': '#5B7C99',
     'primary_light': '#7A9BB8',
@@ -64,9 +55,7 @@ COLORS = {
     'bg_card': '#FFFFFF'
 }
 
-# ============================================================================
-# Language Dictionary
-# ============================================================================
+
 LANG = {
     "en": {
         "title": "Battery Health Monitoring System",
@@ -181,9 +170,6 @@ LANG = {
 }
 
 
-# ============================================================================
-# CSS Styles
-# ============================================================================
 def load_css():
     st.markdown("""
     <style>
@@ -367,10 +353,6 @@ def load_css():
     </style>
     """, unsafe_allow_html=True)
 
-
-# ============================================================================
-# Model Architecture
-# ============================================================================
 class ChannelAttention(nn.Module):
     def __init__(self, in_channels, reduction=16):
         super(ChannelAttention, self).__init__()
@@ -512,9 +494,6 @@ class CBAMCNNTransformer(nn.Module):
         return out.squeeze(1)
 
 
-# ============================================================================
-# Utility Functions
-# ============================================================================
 def set_seed(seed: int = 42):
     random.seed(seed)
     np.random.seed(seed)
@@ -531,9 +510,7 @@ def seed_worker(worker_id: int):
     random.seed(worker_seed)
 
 
-# ============================================================================
-# Dataset
-# ============================================================================
+
 class BatteryDataset(Dataset):
     def __init__(self, features, labels, seq_length=12):
         self.seq_length = seq_length
@@ -556,9 +533,6 @@ class BatteryDataset(Dataset):
         return self.features[idx:idx + self.seq_length], self.labels[idx + self.seq_length - 1]
 
 
-# ============================================================================
-# File Utilities
-# ============================================================================
 def get_data_files():
     files = []
     if os.path.exists(DATA_DIR):
@@ -604,10 +578,6 @@ class IdentityScaler:
     def inverse_transform(self, X):
         return X
 
-
-# ============================================================================
-# FIXED: Model Loading Functions
-# ============================================================================
 def _infer_input_dim_from_state_dict(sd: dict):
     """
     Infer input_dim from the first Conv1d layer weight.
@@ -677,10 +647,7 @@ def load_model_file(path_or_file, device):
     # Remap legacy key names
     sd = _remap_legacy_state_dict(sd_raw)
 
-    # ========================================
-    # CRITICAL FIX: Infer input_dim robustly
-    # Never use ckpt['input_dim'] directly!
-    # ========================================
+
     input_dim = None
 
     # Method 1: Get from checkpoint (using .get() to avoid KeyError)
@@ -756,9 +723,9 @@ def load_model_file(path_or_file, device):
     return model, ckpt
 
 
-# ============================================================================
-# Demo Data Generator
-# ============================================================================
+
+# Demo Data 
+
 def generate_demo_data():
     np.random.seed(42)
     n = 200
@@ -819,9 +786,6 @@ def generate_demo_results():
     }
 
 
-# ============================================================================
-# Helper Functions
-# ============================================================================
 def T(key, lang):
     return LANG.get(lang, LANG['en']).get(key, key)
 
@@ -870,9 +834,7 @@ def get_rated_capacity(ckpt: dict, user_value: float) -> float:
     return float(user_value)
 
 
-# ============================================================================
-# Plotting Functions
-# ============================================================================
+
 def plot_feature_importance(names, values):
     setup_plot()
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -1102,9 +1064,6 @@ def mean_absolute_percentage_error(y_true, y_pred):
         return 0.0
     return np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100
 
-# ============================================================================
-# Training & Prediction Functions
-# ============================================================================
 def train_model(train_features, train_labels, config, progress_cb=None):
     seed = int(config.get('seed', 42))
     set_seed(seed)
@@ -1261,10 +1220,7 @@ def predict_with_model(model, test_features, test_labels, scaler_X, scaler_y, se
 
 
 def calculate_shap_values(model, dataset, scaler_X, scaler_y, device, n_samples=200):
-    """
-    使用 SHAP GradientExplainer 计算真正的SHAP值
-    如果SHAP库不可用，则回退到扰动方法
-    """
+
     np.random.seed(42)
 
     seq_length = dataset.seq_length
@@ -1273,14 +1229,13 @@ def calculate_shap_values(model, dataset, scaler_X, scaler_y, device, n_samples=
 
     max_samples = min(n_samples, len(dataset))
 
-    # 准备数据
     X_data = []
     for idx in range(max_samples):
         seq_X, _ = dataset[idx]
         X_data.append(seq_X.numpy())
     X_data = np.array(X_data)
 
-    # 尝试使用真正的SHAP
+
     if SHAP_AVAILABLE:
         try:
             model.eval()
@@ -1324,7 +1279,6 @@ def calculate_shap_values(model, dataset, scaler_X, scaler_y, device, n_samples=
         except Exception as e:
             print(f"SHAP GradientExplainer failed: {e}, falling back to perturbation method")
 
-    # 回退方法：扰动分析
     feature_importance = np.zeros(n_features)
     shap_values_all = np.zeros((max_samples, n_features))
 
@@ -1358,9 +1312,7 @@ def calculate_shap_values(model, dataset, scaler_X, scaler_y, device, n_samples=
     return feature_importance_norm, shap_values_all, X_data, feature_names
 
 
-# ============================================================================
-# Navigation
-# ============================================================================
+
 def render_nav(lang):
     st.markdown(f"""
     <div class="nav-bar">
@@ -1370,9 +1322,7 @@ def render_nav(lang):
     """, unsafe_allow_html=True)
 
 
-# ============================================================================
-# Results Section
-# ============================================================================
+
 def render_results(results, selected_cycle, lang):
     preds = np.array(results['predictions'], dtype=float)
     acts = np.array(results['actuals'], dtype=float)
@@ -1489,9 +1439,6 @@ def render_results(results, selected_cycle, lang):
     )
 
 
-# ============================================================================
-# Page: Demo
-# ============================================================================
 def page_demo(lang):
     st.markdown(f"""
     <div class="info-banner">
@@ -1609,9 +1556,7 @@ def page_demo(lang):
     render_results(results, selected_cycle, lang)
 
 
-# ============================================================================
-# Page: Train
-# ============================================================================
+
 def page_train(lang):
     st.markdown(f'<div class="section-header">{T("train_title", lang)}</div>', unsafe_allow_html=True)
 
@@ -1780,9 +1725,7 @@ def page_train(lang):
         render_results(results, selected, lang)
 
 
-# ============================================================================
-# Page: Predict
-# ============================================================================
+
 def page_predict(lang):
     st.markdown(f'<div class="section-header">{T("predict_title", lang)}</div>', unsafe_allow_html=True)
 
@@ -1953,9 +1896,6 @@ def page_predict(lang):
         render_results(results, selected, lang)
 
 
-# ============================================================================
-# Page: About
-# ============================================================================
 def page_about(lang):
     st.markdown(f'<div class="section-header">{T("about_title", lang)}</div>', unsafe_allow_html=True)
 
