@@ -57,23 +57,6 @@ CSV files should contain the following columns:
 - `voltage slope`, `current slope` - Temporal gradient features
 - `capacity` - Measured capacity (target)
 
-## Model Configuration
-
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| Sequence Length | 12 | Input sequence length |
-| Epochs | 100 | Maximum training epochs |
-| Batch Size | 64 | Training batch size |
-| Learning Rate | 0.0005 | AdamW optimizer |
-| Attention Heads | 8 | Multi-head attention |
-| Transformer Layers | 4 | Encoder depth |
-| Dropout | 0.3 | Regularization |
-
-## Results
-
-Validated on four datasets (XJTU, MIT, HUST, NUDT):
-- **Single-domain MAE**: 0.45% (XJTU dataset, 6 operating conditions)
-- **Cross-domain MAE**: 1.11% (15 transfer scenarios)
 
 ## Citation
 
@@ -91,7 +74,4 @@ If you find this work useful, please cite:
 
 This project is licensed under the MIT License.
 
-## Contact
 
-For questions or collaborations, please contact:
-- Prof. Yajie Liu: liuyajie@nudt.edu.cn
