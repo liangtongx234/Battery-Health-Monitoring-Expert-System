@@ -66,7 +66,7 @@ If you find this work useful, please cite:
 @article{liang2025interpretable,
   title={Interpretable and Generalizable State-of-Health Estimation for Lithium-Ion Batteries Based on End-of-Charge Features},
   author={Liang, Fuyuan and Zhou, Xing and Yu, Haiqing and Zhang, Tao and Liu, Yajie},
-  note={Under review at Expert Systems with Applications},
+  note={Submitted to Expert Systems with Applications},
   year={2026}
 }
 ```
