@@ -63,7 +63,7 @@ CSV files should contain the following columns:
 
 If you find this work useful, please cite:
 ```bibtex
-@article{liang2025interpretable,
+@article{liang2026interpretable,
   title={Interpretable and Generalizable State-of-Health Estimation for Lithium-Ion Batteries Based on End-of-Charge Features},
   author={Liang, Fuyuan and Zhou, Xing and Yu, Haiqing and Zhang, Tao and Liu, Yajie},
   note={Submitted to Expert Systems with Applications},
