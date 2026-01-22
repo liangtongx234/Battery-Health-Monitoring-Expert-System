@@ -11,7 +11,7 @@ This repository contains the implementation of the battery health monitoring sys
 
 > **Interpretable and Generalizable State-of-Health Estimation for Lithium-Ion Batteries Based on End-of-Charge Features**
 > 
-> Fuyuan Liang, Xing Zhou*, Tao Zhang, Yupeng Si, Yukang Xiao, Yajie Liu*
+> Fuyuan Liang, Xing Zhou*,  Haiqing Yu, Tao Zhang, Yajie Liu*
 > 
 > National University of Defense Technology
 
