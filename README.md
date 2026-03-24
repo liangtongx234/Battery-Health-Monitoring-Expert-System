@@ -66,7 +66,7 @@ If you find this work useful, please cite:
   title={State-of-health estimation of lithium-ion batteries using end-of-charge features with cross-domain validation},
   author={Liang, Fuyuan and Zhou, Xing and Yu, Haiqing and Zhang, Tao and Liu, Yajie},
   journal={Journal of Energy Storage},
-  note={Under review},
+  note={Submitted},
   year={2026}
 }
 ```
