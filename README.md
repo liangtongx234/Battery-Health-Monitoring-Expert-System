@@ -26,7 +26,7 @@ This repository contains the implementation of the battery health monitoring sys
 
 ## System Architecture
 
-![System Interface](figures/System_Interface.png)  
+![System Interface](figures/Web-based battery health monitoring system.png)  
 
 The system integrates:
 - End-of-charge "fingerprint window" feature extraction
