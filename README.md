@@ -25,7 +25,7 @@ This repository contains the implementation and demonstration tool described in:
 
 ## System Architecture
 
-![System Interface](figures/Web-based-battery-health-monitoring-system.png)
+![System Interface](figures/Web-based battery health monitoring system.png)
 
 The system integrates:
 - End-of-charge (EOC) fingerprint window feature extraction
