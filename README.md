@@ -1,17 +1,16 @@
-# Battery Health Monitoring Expert System
+# Battery SOH Estimation with EOC Fingerprint Features
 
 [![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://battery-health-monitoring-expert-system-crzz64eajisrvnvajxoont.streamlit.app/)
 
-An interactive web-based system for lithium-ion battery State-of-Health (SOH) estimation using the CCT-Net (CNN-CBAM-Transformer) deep learning architecture with SHAP-based interpretability analysis.
+An interactive web-based tool for lithium-ion battery state-of-health (SOH) estimation using the CCT-Net (CNN-CBAM-Transformer) architecture with SHAP-based interpretability analysis.
 
 ## Overview
 
+This repository contains the implementation and demonstration tool described in:
 
-This repository contains the implementation of the battery health monitoring system described in:
-
-> **Interpretable and Generalizable State-of-Health Estimation for Lithium-Ion Batteries Based on End-of-Charge Features**
+> **State-of-health estimation of lithium-ion batteries using end-of-charge features with cross-domain validation**
 > 
-> Fuyuan Liang, Xing Zhou*,  Haiqing Yu, Tao Zhang, Yajie Liu*
+> Fuyuan Liang, Xing Zhou\*, Haiqing Yu, Tao Zhang, Yajie Liu\*
 > 
 > National University of Defense Technology
 
@@ -22,20 +21,21 @@ This repository contains the implementation of the battery health monitoring sys
 - **Demo Mode**: Explore the system with pre-loaded battery degradation data and trained models
 - **Train Mode**: Upload custom datasets and train CCT-Net models with configurable parameters
 - **Predict Mode**: Real-time SOH estimation with evaluation metrics (MAE, RMSE, MAPE)
-- **SHAP Analysis**: Feature importance visualization and degradation mechanism interpretation
+- **SHAP Analysis**: Feature importance visualization across degradation stages
 
 ## System Architecture
 
-![System Interface](figures/Web-based battery health monitoring system.png)  
+![System Interface](figures/Web-based-battery-health-monitoring-system.png)
 
 The system integrates:
-- End-of-charge "fingerprint window" feature extraction
+- End-of-charge (EOC) fingerprint window feature extraction
 - CCT-Net (CNN-CBAM-Transformer) architecture for SOH prediction
-- SHAP-based interpretability analysis linking predictions to degradation mechanisms
+- SHAP-based interpretability analysis for feature contribution quantification
 
 ## Installation
 
 ### Option 1: Use Online Demo (Recommended)
+
 Visit the [live demo](https://battery-health-monitoring-expert-system-crzz64eajisrvnvajxoont.streamlit.app/) directly.
 
 ### Option 2: Local Installation
@@ -58,15 +58,15 @@ CSV files should contain the following columns:
 - `voltage slope`, `current slope` - Temporal gradient features
 - `capacity` - Measured capacity (target)
 
-
 ## Citation
 
 If you find this work useful, please cite:
 ```bibtex
-@article{liang2026interpretable,
-  title={Interpretable and Generalizable State-of-Health Estimation for Lithium-Ion Batteries Based on End-of-Charge Features},
+@article{liang2026soh,
+  title={State-of-health estimation of lithium-ion batteries using end-of-charge features with cross-domain validation},
   author={Liang, Fuyuan and Zhou, Xing and Yu, Haiqing and Zhang, Tao and Liu, Yajie},
-  note={Submitted to Expert Systems with Applications},
+  journal={Journal of Energy Storage},
+  note={Under review},
   year={2026}
 }
 ```
@@ -74,5 +74,3 @@ If you find this work useful, please cite:
 ## License
 
 This project is licensed under the MIT License.
-
-
