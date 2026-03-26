@@ -627,22 +627,17 @@ def _remap_legacy_state_dict(sd: dict) -> dict:
 
 
 def load_model_file(path_or_file, device):
-
     ckpt = torch.load(path_or_file, map_location=device, weights_only=False)
 
-    # Handle different checkpoint formats
     if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
         sd_raw = ckpt["model_state_dict"]
     else:
         sd_raw = ckpt
         ckpt = {"model_state_dict": sd_raw}
 
-    # Remap legacy key names
     sd = _remap_legacy_state_dict(sd_raw)
 
     input_dim = None
-
-    # Method 1: Get from checkpoint (using .get() to avoid KeyError)
     stored_dim = ckpt.get("input_dim")
     if stored_dim is not None:
         try:
@@ -650,62 +645,54 @@ def load_model_file(path_or_file, device):
         except (ValueError, TypeError):
             pass
 
-    # Method 2: Infer from feature_names
     if input_dim is None:
         fn = ckpt.get("feature_names")
         if isinstance(fn, (list, tuple)) and len(fn) > 0:
             input_dim = len(fn)
 
-    # Method 3: Infer from Conv1d weights (most reliable for legacy)
     if input_dim is None:
         input_dim = _infer_input_dim_from_state_dict(sd)
 
     if input_dim is None:
-        raise ValueError(
-            "Cannot determine input_dim from checkpoint. "
-            "Model file may be corrupted or unsupported format."
-        )
+        raise ValueError("Cannot determine input_dim from checkpoint.")
 
     input_dim = int(input_dim)
 
-    # Get config with defaults
     cfg = ckpt.get("config") or {}
     num_heads = int(cfg.get("num_heads", 8))
     num_layers = int(cfg.get("num_layers", 4))
     dropout = float(cfg.get("dropout", 0.3))
 
-    # Build model
+    # Infer max_len from checkpoint to avoid pe shape mismatch
+    pe_key = "positional_encoding.pe"
+    max_len = 5000  # default
+    if pe_key in sd and hasattr(sd[pe_key], "shape") and len(sd[pe_key].shape) == 3:
+        max_len = int(sd[pe_key].shape[1])
+
     model = CBAMCNNTransformer(
-        input_dim=input_dim,
-        embed_dim=128,
-        num_heads=num_heads,
-        num_layers=num_layers,
-        dropout=dropout
+        input_dim=input_dim, embed_dim=128,
+        num_heads=num_heads, num_layers=num_layers, dropout=dropout
     ).to(device)
 
-    # Load weights (strict=False for partial matches)
+    # Replace positional encoding if checkpoint has different max_len
+    if max_len != 5000:
+        model.positional_encoding = PositionalEncoding(128, max_len=max_len).to(device)
+
     missing, unexpected = model.load_state_dict(sd, strict=False)
 
-    # Populate checkpoint with required fields
     ckpt["input_dim"] = input_dim
     ckpt["config"] = cfg
-
     if "seq_length" not in ckpt:
         ckpt["seq_length"] = 12
-
     if "rated_capacity" not in ckpt:
         ckpt["rated_capacity"] = 2.0
-
     if ckpt.get("scaler_X") is None:
         ckpt["scaler_X"] = IdentityScaler()
-
     if ckpt.get("scaler_y") is None:
         ckpt["scaler_y"] = IdentityScaler()
-
     if not isinstance(ckpt.get("feature_names"), (list, tuple)):
         ckpt["feature_names"] = [f"f{i}" for i in range(input_dim)]
 
-    # Optional warning
     if missing or unexpected:
         st.warning(
             f"Model loaded (strict=False): {len(missing)} missing, {len(unexpected)} unexpected keys. "
@@ -713,6 +700,7 @@ def load_model_file(path_or_file, device):
         )
 
     return model, ckpt
+
 
 
 
@@ -1974,7 +1962,7 @@ def main():
     load_css()
 
     if 'lang' not in st.session_state:
-        st.session_state.lang = 'en' 
+        st.session_state.lang = 'en'
     if 'page' not in st.session_state:
         st.session_state.page = 'demo'
     if 'demo_cycle' not in st.session_state:
