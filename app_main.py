@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -41,7 +42,6 @@ MODELS_DIR = os.path.join(BASE_DIR, 'saved_models')
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(MODELS_DIR, exist_ok=True)
 
-
 COLORS = {
     'primary': '#5B7C99',
     'primary_light': '#7A9BB8',
@@ -56,6 +56,7 @@ COLORS = {
     'bg': '#F5F7F9',
     'bg_card': '#FFFFFF'
 }
+
 
 LANG = {
     "en": {
@@ -87,9 +88,9 @@ LANG = {
         "shap_title": "SHAP Analysis",
         "current_soh": "Current SOH",
         "select_cycle": "Select Cycle",
-        "feature_importance": "Feature Importance",
-        "prediction_trend": "Prediction Trend",
-        "mechanism_analysis": "Degradation Mechanism",
+        "feature_importance": "Feature Importance Ranking",
+        "prediction_trend": "Prediction vs Actual SOH",
+        "dependency_plot": "Feature Dependency",
         "download_results": "Download Results",
         "mae": "MAE",
         "rmse": "RMSE",
@@ -108,7 +109,7 @@ LANG = {
         "model_source": "Model Source",
         "processing": "Processing...",
         "about_title": "About",
-        "about_text": "Battery SOH prediction system using CBAM-CNN-Transformer with SHAP interpretability.",
+        "about_text": "Battery SOH estimation tool using CCT-Net (CNN-CBAM-Transformer) with SHAP-based interpretability analysis.",
         "config": "Configuration",
         "using_repo": "Using repository data and model",
         "using_demo": "Using generated demo data"
@@ -142,9 +143,9 @@ LANG = {
         "shap_title": "SHAP分析",
         "current_soh": "当前SOH",
         "select_cycle": "选择循环",
-        "feature_importance": "特征重要性",
-        "prediction_trend": "预测趋势",
-        "mechanism_analysis": "退化机理",
+        "feature_importance": "特征重要性排序",
+        "prediction_trend": "预测与实际SOH对比",
+        "dependency_plot": "特征依赖关系",
         "download_results": "下载结果",
         "mae": "MAE",
         "rmse": "RMSE",
@@ -163,7 +164,7 @@ LANG = {
         "model_source": "模型来源",
         "processing": "处理中...",
         "about_title": "关于",
-        "about_text": "使用CBAM-CNN-Transformer和SHAP可解释性的电池SOH预测系统。",
+        "about_text": "使用CCT-Net (CNN-CBAM-Transformer)和SHAP可解释性分析的电池SOH预测工具。",
         "config": "配置",
         "using_repo": "使用仓库中的数据和模型",
         "using_demo": "使用生成的演示快速数据"
@@ -303,28 +304,6 @@ def load_css():
         text-transform: uppercase;
         letter-spacing: 0.05em;
         margin-top: 0.25rem;
-    }
-
-    .mechanism-item {
-        background: var(--bg-card);
-        border-radius: 8px;
-        padding: 0.75rem 1rem;
-        margin: 0.5rem 0;
-        border: 1px solid var(--border);
-    }
-
-    .mechanism-bar {
-        height: 6px;
-        border-radius: 3px;
-        background: var(--border);
-        margin-top: 0.5rem;
-        overflow: hidden;
-    }
-
-    .mechanism-fill {
-        height: 100%;
-        background: linear-gradient(90deg, var(--primary-light), var(--primary));
-        border-radius: 3px;
     }
 
     .stButton > button {
@@ -495,6 +474,8 @@ class CBAMCNNTransformer(nn.Module):
         out = self.fc_out(pooled_features)
         return out.squeeze(1)
 
+
+
 def set_seed(seed: int = 42):
     random.seed(seed)
     np.random.seed(seed)
@@ -509,7 +490,6 @@ def seed_worker(worker_id: int):
     worker_seed = torch.initial_seed() % 2 ** 32
     np.random.seed(worker_seed)
     random.seed(worker_seed)
-
 
 
 class BatteryDataset(Dataset):
@@ -532,7 +512,6 @@ class BatteryDataset(Dataset):
 
     def __getitem__(self, idx):
         return self.features[idx:idx + self.seq_length], self.labels[idx + self.seq_length - 1]
-
 
 
 def get_data_files():
@@ -569,30 +548,21 @@ def read_csv(file_or_path):
 
 
 class IdentityScaler:
-
+    """Dummy scaler that returns input unchanged."""
     def fit(self, X):
         return self
-
     def transform(self, X):
         return X
-
     def inverse_transform(self, X):
         return X
 
-
 def _infer_input_dim_from_state_dict(sd: dict):
-
-    possible_keys = [
-        "cnn_block1.0.weight",  # New naming 
-        "cnn1.0.weight",  # Legacy naming
-    ]
-
+    possible_keys = ["cnn_block1.0.weight", "cnn1.0.weight"]
     for k in possible_keys:
         if k in sd:
             weight = sd[k]
             if hasattr(weight, "shape") and len(weight.shape) == 3:
                 return int(weight.shape[1])
-
     return None
 
 
@@ -600,28 +570,19 @@ def _remap_legacy_state_dict(sd: dict) -> dict:
     out = {}
     for k, v in sd.items():
         nk = k
-
         if nk == "query":
             nk = "pool_query"
-
         prefix_mappings = [
-            ("cnn1.", "cnn_block1."),
-            ("cnn2.", "cnn_block2."),
-            ("pos_enc.", "positional_encoding."),
-            ("transformer.", "transformer_encoder."),
-            ("attn_pool.", "attention_pool."),
-            ("fc.", "fc_out."),
-            ("cbam1.ca.", "cbam1.channel_attention."),
-            ("cbam1.sa.", "cbam1.spatial_attention."),
-            ("cbam2.ca.", "cbam2.channel_attention."),
-            ("cbam2.sa.", "cbam2.spatial_attention."),
+            ("cnn1.", "cnn_block1."), ("cnn2.", "cnn_block2."),
+            ("pos_enc.", "positional_encoding."), ("transformer.", "transformer_encoder."),
+            ("attn_pool.", "attention_pool."), ("fc.", "fc_out."),
+            ("cbam1.ca.", "cbam1.channel_attention."), ("cbam1.sa.", "cbam1.spatial_attention."),
+            ("cbam2.ca.", "cbam2.channel_attention."), ("cbam2.sa.", "cbam2.spatial_attention."),
         ]
-
         for old_prefix, new_prefix in prefix_mappings:
             if nk.startswith(old_prefix):
                 nk = nk.replace(old_prefix, new_prefix, 1)
                 break
-
         out[nk] = v
     return out
 
@@ -701,9 +662,6 @@ def load_model_file(path_or_file, device):
 
     return model, ckpt
 
-
-
-
 def generate_demo_data():
     np.random.seed(42)
     n = 200
@@ -764,6 +722,7 @@ def generate_demo_results():
     }
 
 
+
 def T(key, lang):
     return LANG.get(lang, LANG['en']).get(key, key)
 
@@ -812,6 +771,14 @@ def get_rated_capacity(ckpt: dict, user_value: float) -> float:
     return float(user_value)
 
 
+def mean_absolute_percentage_error(y_true, y_pred):
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+    mask = y_true != 0
+    if mask.sum() == 0:
+        return 0.0
+    return np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100
+
 
 def plot_feature_importance(names, values):
     setup_plot()
@@ -830,7 +797,7 @@ def plot_feature_importance(names, values):
     ax.set_yticks(range(n))
     ax.set_yticklabels([names[i] for i in idx], fontsize=10, fontweight='500')
     ax.set_xlabel('Normalized Importance', fontweight='600')
-    ax.set_title('Feature Importance', fontweight='700', pad=12)
+    ax.set_title('Feature Importance Ranking', fontweight='700', pad=12)
     ax.set_xlim(0, 1.15)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
@@ -857,7 +824,7 @@ def plot_prediction_trend(actual, predicted, selected=None):
 
     ax.set_xlabel('Cycle', fontweight='600')
     ax.set_ylabel('SOH (%)', fontweight='600')
-    ax.set_title('Prediction vs Actual SOH', fontweight='700', pad=12)
+    ax.set_title('Predicted vs Actual SOH', fontweight='700', pad=12)
     ax.legend(loc='upper right')
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
@@ -872,14 +839,12 @@ def plot_waterfall(names, shap_vals, base_val, suffix=""):
 
     top_idx = np.argsort(np.abs(shap_vals))[::-1][:10]
 
-    # base_val is already in percentage (0-100 range from render_results)
     heights = [base_val]
     colors = [COLORS['primary']]
     labels = ['Base']
 
     for i in top_idx:
         val = shap_vals[i]
-        # SHAP values are small, multiply by 100 for percentage contribution
         heights.append(abs(val) * 100)
         colors.append(COLORS['secondary'] if val > 0 else COLORS['danger'])
         labels.append(names[i][:12] if i < len(names) else f'F{i}')
@@ -894,17 +859,15 @@ def plot_waterfall(names, shap_vals, base_val, suffix=""):
 
     for i, (p, h) in enumerate(zip(pos, heights)):
         if i == 0 or i == len(pos) - 1:
-            # Base and Final: show as percentage directly (no additional *100)
             ax.text(p, h + 1, f'{h:.1f}%', ha='center', va='bottom', fontsize=10, fontweight='700')
         else:
-            # SHAP contributions: already multiplied by 100 in heights
             orig = shap_vals[top_idx[i - 1]] * 100
             ax.text(p, h + 0.5, f'{orig:+.2f}%', ha='center', va='bottom', fontsize=9, fontweight='600')
 
     ax.set_xticks(pos)
     ax.set_xticklabels(labels, rotation=45, ha='right', fontsize=10, fontweight='500')
     ax.set_ylabel('SOH (%)', fontweight='600')
-    ax.set_title(f'SHAP Waterfall Analysis {suffix}', fontweight='700', pad=12)
+    ax.set_title(f'SHAP Decision Decomposition {suffix}', fontweight='700', pad=12)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
 
@@ -945,7 +908,7 @@ def plot_beeswarm(names, shap_vals, feat_vals):
     ax.set_yticks(range(len(top_idx)))
     ax.set_yticklabels([names[i][:18] for i in top_idx], fontsize=10, fontweight='500')
     ax.set_xlabel('SHAP Value', fontweight='600')
-    ax.set_title('SHAP Beeswarm Plot', fontweight='700', pad=12)
+    ax.set_title('SHAP Value Distribution', fontweight='700', pad=12)
 
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(0, 1))
     sm.set_array([])
@@ -959,24 +922,53 @@ def plot_beeswarm(names, shap_vals, feat_vals):
     return fig
 
 
-def plot_radar(mechanisms, contributions):
+def plot_dependency(names, shap_vals, feat_vals):
+    """Plot SHAP dependency for top 4 features."""
     setup_plot()
-    fig, ax = plt.subplots(figsize=(6, 6), subplot_kw=dict(projection='polar'))
 
-    angles = np.linspace(0, 2 * np.pi, len(mechanisms), endpoint=False)
-    values = np.concatenate([contributions, [contributions[0]]])
-    angles = np.concatenate([angles, [angles[0]]])
+    importance = np.abs(shap_vals).mean(axis=0)
+    top_idx = np.argsort(importance)[::-1][:4]
+    n_plots = len(top_idx)
 
-    ax.plot(angles, values, 'o-', lw=2.5, color=COLORS['primary'], ms=8,
-            markerfacecolor=COLORS['primary_dark'], markeredgecolor='white', markeredgewidth=1.5)
-    ax.fill(angles, values, alpha=0.2, color=COLORS['primary'])
+    fig, axes = plt.subplots(2, 2, figsize=(10, 8))
+    axes = axes.flatten()
 
-    ax.set_xticks(angles[:-1])
-    ax.set_xticklabels(mechanisms, fontsize=9, fontweight='500')
-    ax.set_ylim(0, 1)
-    ax.set_facecolor(COLORS['bg'])
-    ax.grid(True, alpha=0.4, color=COLORS['border'])
+    for i, fi in enumerate(top_idx):
+        ax = axes[i]
+        sv = shap_vals[:, fi]
 
+        if feat_vals is not None and fi < feat_vals.shape[1]:
+            fv = feat_vals[:len(sv), fi]
+        else:
+            fv = np.arange(len(sv))
+
+        # Color by SHAP value direction
+        colors_pos = np.where(sv >= 0, COLORS['secondary'], COLORS['danger'])
+
+        ax.scatter(fv, sv, c=colors_pos, s=30, alpha=0.55, edgecolors='white', lw=0.3)
+        ax.axhline(0, color=COLORS['text_muted'], ls='--', alpha=0.4, lw=1)
+
+        # Trend line
+        if len(fv) > 5:
+            z = np.polyfit(fv, sv, 1)
+            p = np.poly1d(z)
+            x_sorted = np.sort(fv)
+            ax.plot(x_sorted, p(x_sorted), color=COLORS['primary'], lw=2, alpha=0.7)
+
+        fname = names[fi] if fi < len(names) else f'Feature {fi}'
+        ax.set_xlabel(fname[:20], fontweight='500', fontsize=9)
+        ax.set_ylabel('SHAP Value', fontweight='500', fontsize=9)
+        ax.set_title(fname[:20], fontweight='600', fontsize=10, pad=6)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.tick_params(labelsize=8)
+
+    # Hide unused subplots
+    for i in range(n_plots, 4):
+        axes[i].set_visible(False)
+
+    fig.suptitle('SHAP Feature Dependency', fontweight='700', fontsize=13, y=1.01)
+    plt.tight_layout()
     return fig
 
 
@@ -999,52 +991,6 @@ def plot_training_curve(train_loss, val_loss):
     return fig
 
 
-def categorize_mechanisms(names, importance):
-    mechanisms = {
-        'Interface Polarization': [],
-        'Active Material Loss': [],
-        'Transport Limitation': [],
-        'Complex Degradation': []
-    }
-
-    keys = list(mechanisms.keys())
-
-    for i, name in enumerate(names):
-        low = name.lower()
-        if 'cv' in low:
-            mechanisms[keys[0]].append(i)
-        elif 'cc' in low or 'capacity' in low:
-            mechanisms[keys[1]].append(i)
-        elif 'slope' in low or 'resistance' in low:
-            mechanisms[keys[2]].append(i)
-        else:
-            mechanisms[keys[3]].append(i)
-
-    result_names = []
-    result_contrib = []
-
-    for name, indices in mechanisms.items():
-        if indices:
-            result_names.append(name)
-            result_contrib.append(np.mean(importance[indices]))
-
-    contrib = np.array(result_contrib)
-    if contrib.max() > 0:
-        contrib = contrib / contrib.max()
-
-    return result_names, contrib
-
-def mean_absolute_percentage_error(y_true, y_pred):
-    y_true = np.array(y_true)
-    y_pred = np.array(y_pred)
-    mask = y_true != 0
-    if mask.sum() == 0:
-        return 0.0
-    return np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100
-
-# ============================================================================
-# Training & Prediction Functions
-# ============================================================================
 def train_model(train_features, train_labels, config, progress_cb=None):
     seed = int(config.get('seed', 42))
     set_seed(seed)
@@ -1064,8 +1010,7 @@ def train_model(train_features, train_labels, config, progress_cb=None):
     )
 
     val_ratio = float(config.get('val_ratio', 0.1))
-    val_size = int(val_ratio * len(dataset))
-    val_size = max(1, val_size)
+    val_size = max(1, int(val_ratio * len(dataset)))
     train_size = max(1, len(dataset) - val_size)
 
     g = torch.Generator().manual_seed(seed)
@@ -1085,8 +1030,7 @@ def train_model(train_features, train_labels, config, progress_cb=None):
     )
 
     model = CBAMCNNTransformer(
-        input_dim=train_features.shape[1],
-        embed_dim=128,
+        input_dim=train_features.shape[1], embed_dim=128,
         num_heads=int(config.get('num_heads', 8)),
         num_layers=int(config.get('num_layers', 4)),
         dropout=float(config.get('dropout', 0.3))
@@ -1094,34 +1038,28 @@ def train_model(train_features, train_labels, config, progress_cb=None):
 
     criterion = nn.MSELoss()
     optimizer = optim.AdamW(model.parameters(), lr=float(config['learning_rate']), weight_decay=1e-5)
-
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=5, min_lr=1e-6
-    )
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, min_lr=1e-6)
 
     num_epochs = int(config['num_epochs'])
     es_patience = int(config.get('patience', 10))
 
-    train_losses, val_losses, val_r2_list = [], [], []
+    train_losses, val_losses = [], []
     best_val_r2 = float('-inf')
     best_state = None
     no_improve = 0
 
     for epoch in range(num_epochs):
         model.train()
-        total_loss = 0.0
-        total_n = 0
+        total_loss, total_n = 0.0, 0
 
         for X, y in train_loader:
             X, y = X.to(device), y.to(device)
-
             optimizer.zero_grad(set_to_none=True)
             out = model(X)
             loss = criterion(out, y)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
-
             bs = X.size(0)
             total_loss += loss.item() * bs
             total_n += bs
@@ -1130,20 +1068,17 @@ def train_model(train_features, train_labels, config, progress_cb=None):
         train_losses.append(train_loss)
 
         model.eval()
-        total_vloss = 0.0
-        total_vn = 0
+        total_vloss, total_vn = 0.0, 0
         y_true_val, y_pred_val = [], []
 
         with torch.no_grad():
             for X, y in val_loader:
                 X, y = X.to(device), y.to(device)
                 out = model(X)
-
                 vloss = criterion(out, y)
                 bs = X.size(0)
                 total_vloss += vloss.item() * bs
                 total_vn += bs
-
                 y_true_val.extend(y.detach().cpu().numpy().tolist())
                 y_pred_val.extend(out.detach().cpu().numpy().tolist())
 
@@ -1151,8 +1086,6 @@ def train_model(train_features, train_labels, config, progress_cb=None):
         val_losses.append(val_loss)
 
         val_r2 = r2_score(y_true_val, y_pred_val) if len(y_true_val) > 1 else 0.0
-        val_r2_list.append(val_r2)
-
         scheduler.step(val_loss)
 
         if val_r2 > best_val_r2:
@@ -1201,56 +1134,47 @@ def predict_with_model(model, test_features, test_labels, scaler_X, scaler_y, se
 
 
 def calculate_shap_values(model, dataset, scaler_X, scaler_y, device, n_samples=200):
-
     np.random.seed(42)
 
     seq_length = dataset.seq_length
     feature_names = dataset.feature_names
     n_features = len(feature_names)
 
-    max_samples = min(n_samples, len(dataset))
+    total_samples = len(dataset)
+    max_samples = min(n_samples, total_samples)
 
-    # 准备数据
+    # Random sampling (not sequential) to avoid bias toward early cycles
+    sample_indices = np.random.choice(total_samples, max_samples, replace=False)
+    sample_indices.sort()  # Sort for reproducibility
+
     X_data = []
-    for idx in range(max_samples):
+    for idx in sample_indices:
         seq_X, _ = dataset[idx]
         X_data.append(seq_X.numpy())
     X_data = np.array(X_data)
 
-    # 尝试使用真正的SHAP
     if SHAP_AVAILABLE:
         try:
             model.eval()
+            # Use random subset as background
+            bg_size = min(50, max_samples)
+            bg_indices = np.random.choice(max_samples, bg_size, replace=False)
+            background = torch.tensor(X_data[bg_indices], dtype=torch.float32).to(device)
+            test_data = torch.tensor(X_data, dtype=torch.float32).to(device)
 
-            # 转换为tensor
-            background_size = min(50, max_samples)
-            background = torch.tensor(X_data[:background_size], dtype=torch.float32).to(device)
-            test_data = torch.tensor(X_data[:max_samples], dtype=torch.float32).to(device)
-
-            # 创建 GradientExplainer
             explainer = shap.GradientExplainer(model, background)
-
-            # 计算SHAP值 - 返回形状: (n_samples, seq_length, n_features)
             shap_values_raw = explainer.shap_values(test_data)
 
-            # 如果返回的是列表（多输出），取第一个
             if isinstance(shap_values_raw, list):
                 shap_values_raw = shap_values_raw[0]
-
-            # 转换为numpy
             if torch.is_tensor(shap_values_raw):
                 shap_values_raw = shap_values_raw.cpu().numpy()
-
-            # 对序列维度取平均，得到每个特征的SHAP值: (n_samples, n_features)
             if len(shap_values_raw.shape) == 3:
                 shap_values_all = shap_values_raw.mean(axis=1)
             else:
                 shap_values_all = shap_values_raw
 
-            # 计算特征重要性 = |SHAP值|的平均
             feature_importance = np.abs(shap_values_all).mean(axis=0)
-
-            # 归一化
             if feature_importance.max() > 0:
                 feature_importance_norm = feature_importance / feature_importance.max()
             else:
@@ -1261,13 +1185,14 @@ def calculate_shap_values(model, dataset, scaler_X, scaler_y, device, n_samples=
         except Exception as e:
             print(f"SHAP GradientExplainer failed: {e}, falling back to perturbation method")
 
-    # 回退方法：扰动分析
+    # Fallback: perturbation analysis (also uses random samples)
     feature_importance = np.zeros(n_features)
+    n_perturb = min(50, max_samples)
     shap_values_all = np.zeros((max_samples, n_features))
 
     model.eval()
     with torch.no_grad():
-        for sample_idx in range(min(50, max_samples)):
+        for sample_idx in range(n_perturb):
             seq = X_data[sample_idx].reshape(seq_length, n_features)
             seq_tensor = torch.tensor(seq, dtype=torch.float32).unsqueeze(0).to(device)
             base_pred = model(seq_tensor).cpu().numpy()[0]
@@ -1282,18 +1207,17 @@ def calculate_shap_values(model, dataset, scaler_X, scaler_y, device, n_samples=
                 feature_importance[j] += abs(imp)
                 shap_values_all[sample_idx, j] = imp
 
-    feature_importance /= min(50, max_samples)
+    feature_importance /= n_perturb
 
     if feature_importance.max() > 0:
         feature_importance_norm = feature_importance / feature_importance.max()
     else:
         feature_importance_norm = feature_importance
 
-    for sample_idx in range(50, max_samples):
+    for sample_idx in range(n_perturb, max_samples):
         shap_values_all[sample_idx] = feature_importance_norm * np.random.randn(n_features) * 0.1
 
     return feature_importance_norm, shap_values_all, X_data, feature_names
-
 
 
 def render_nav(lang):
@@ -1303,7 +1227,6 @@ def render_nav(lang):
         <p class="nav-subtitle">{T('subtitle', lang)}</p>
     </div>
     """, unsafe_allow_html=True)
-
 
 def render_results(results, selected_cycle, lang):
     preds = np.array(results['predictions'], dtype=float)
@@ -1319,6 +1242,7 @@ def render_results(results, selected_cycle, lang):
 
     selected_cycle = int(np.clip(selected_cycle, 0, len(preds) - 1))
 
+    # --- Metrics row ---
     col1, col2, col3, col4 = st.columns([1.5, 0.8, 0.8, 0.8])
 
     with col1:
@@ -1337,11 +1261,8 @@ def render_results(results, selected_cycle, lang):
         </div>
         """, unsafe_allow_html=True)
 
-    preds_pct = preds
-    acts_pct = acts
-
     with col2:
-        mae = mean_absolute_error(acts_pct, preds_pct)
+        mae = mean_absolute_error(acts, preds)
         st.markdown(f"""
         <div class="metric-card">
             <div class="metric-value">{mae:.3f}%</div>
@@ -1350,7 +1271,7 @@ def render_results(results, selected_cycle, lang):
         """, unsafe_allow_html=True)
 
     with col3:
-        rmse = np.sqrt(mean_squared_error(acts_pct, preds_pct))
+        rmse = np.sqrt(mean_squared_error(acts, preds))
         st.markdown(f"""
         <div class="metric-card">
             <div class="metric-value">{rmse:.3f}%</div>
@@ -1359,7 +1280,7 @@ def render_results(results, selected_cycle, lang):
         """, unsafe_allow_html=True)
 
     with col4:
-        mape = mean_absolute_percentage_error(acts_pct, preds_pct)
+        mape = mean_absolute_percentage_error(acts, preds)
         st.markdown(f"""
         <div class="metric-card">
             <div class="metric-value">{mape:.2f}%</div>
@@ -1367,11 +1288,13 @@ def render_results(results, selected_cycle, lang):
         </div>
         """, unsafe_allow_html=True)
 
+    # --- Prediction trend ---
     st.markdown(f'<div class="section-header">{T("prediction_trend", lang)}</div>', unsafe_allow_html=True)
-    fig_trend = plot_prediction_trend(acts_pct, preds_pct, selected_cycle)
+    fig_trend = plot_prediction_trend(acts, preds, selected_cycle)
     st.pyplot(fig_trend)
     plt.close(fig_trend)
 
+    # --- SHAP Analysis ---
     st.markdown(f'<div class="section-header">{T("shap_title", lang)}</div>', unsafe_allow_html=True)
 
     col1, col2 = st.columns(2)
@@ -1397,19 +1320,18 @@ def render_results(results, selected_cycle, lang):
         plt.close(fig3)
 
     with col2:
-        st.markdown(f'<div class="section-header">{T("mechanism_analysis", lang)}</div>', unsafe_allow_html=True)
-
-        mech_names, mech_contrib = categorize_mechanisms(names, importance)
-        fig4 = plot_radar(mech_names, mech_contrib)
+        st.markdown(f'<div class="section-header">{T("dependency_plot", lang)}</div>', unsafe_allow_html=True)
+        fig4 = plot_dependency(names, shap_vals, feat_scaled[:len(shap_vals)] if feat_scaled is not None else None)
         st.pyplot(fig4)
         plt.close(fig4)
 
+    # --- Download ---
     st.markdown("<br>", unsafe_allow_html=True)
     results_df = pd.DataFrame({
         'Cycle': np.arange(1, len(preds) + 1),
-        'Actual_SOH_percent': acts_pct,
-        'Predicted_SOH_percent': preds_pct,
-        'Error_percent': (acts_pct - preds_pct),
+        'Actual_SOH_percent': acts,
+        'Predicted_SOH_percent': preds,
+        'Error_percent': (acts - preds),
     })
 
     csv = results_df.to_csv(index=False)
@@ -1465,7 +1387,6 @@ def page_demo(lang):
                             df = df.drop(avail_drops, axis=1)
 
                         feature_names = ckpt.get('feature_names', None)
-
                         exclude = {target_col, "SOH"}
                         cand = [c for c in df.columns
                                 if c not in exclude and pd.api.types.is_numeric_dtype(df[c])]
@@ -1475,19 +1396,14 @@ def page_demo(lang):
 
                         if not use_ckpt_cols:
                             if input_dim <= 0:
-                                st.warning("Demo: Model missing input_dim, falling back to demo data.")
                                 raise RuntimeError("demo missing input_dim")
                             if len(cand) < input_dim:
-                                st.warning("Demo: CSV has insufficient numeric columns, falling back to demo data.")
                                 raise RuntimeError("demo not enough cols")
                             feature_names = cand[:input_dim]
                             ckpt["feature_names"] = feature_names
-                            st.warning(
-                                f"Demo: Legacy model without feature_names, auto-selected {len(feature_names)} columns.")
 
                         test_features = df[feature_names].copy()
                         test_labels = df['SOH']
-
                         test_features = test_features.replace([np.inf, -np.inf], np.nan).fillna(0)
                         test_labels = test_labels.replace([np.inf, -np.inf], np.nan).fillna(0)
 
@@ -1496,20 +1412,16 @@ def page_demo(lang):
                         )
 
                         with st.spinner(
-                                " SHAP分析计算中，请稍等..." if lang == 'zh' else " Computing SHAP analysis, please wait..."):
+                                " SHAP分析计算中..." if lang == 'zh' else " Computing SHAP analysis..."):
                             importance, shap_vals, _, _ = calculate_shap_values(
                                 model, dataset, scaler_X, scaler_y, device
                             )
 
                         st.session_state.demo_results = {
-                            'predictions': preds,
-                            'actuals': acts,
-                            'feature_importance': importance,
-                            'shap_values': shap_vals,
-                            'feature_names': feature_names,
-                            'features_scaled': feat_scaled,
-                            'df': df,
-                            'source': 'repo'
+                            'predictions': preds, 'actuals': acts,
+                            'feature_importance': importance, 'shap_values': shap_vals,
+                            'feature_names': feature_names, 'features_scaled': feat_scaled,
+                            'df': df, 'source': 'repo'
                         }
             except Exception as e:
                 st.warning(f"Could not load repository data: {str(e)}")
@@ -1545,12 +1457,10 @@ def page_train(lang):
 
     with col1:
         st.markdown('<div class="card">', unsafe_allow_html=True)
-
         data_source = st.radio(
             T('data_source', lang),
             [T('load_from_repo', lang), T('upload_custom', lang)],
-            horizontal=True,
-            key='train_data_source'
+            horizontal=True, key='train_data_source'
         )
 
         train_files = None
@@ -1560,14 +1470,12 @@ def page_train(lang):
             data_files = get_data_files()
             if data_files:
                 train_files = st.multiselect(
-                    T('upload_train', lang),
-                    data_files,
+                    T('upload_train', lang), data_files,
                     default=data_files[:1] if data_files else [],
                     format_func=lambda x: os.path.basename(x)
                 )
                 test_file = st.selectbox(
-                    T('upload_test', lang),
-                    data_files,
+                    T('upload_test', lang), data_files,
                     format_func=lambda x: os.path.basename(x)
                 )
             else:
@@ -1634,13 +1542,9 @@ def page_train(lang):
                     st.info(f"Training: {len(train_features)} samples | {len(train_features.columns)} features")
 
                     config = {
-                        'seq_length': seq_length,
-                        'num_epochs': num_epochs,
-                        'batch_size': batch_size,
-                        'learning_rate': learning_rate,
-                        'num_heads': 8,
-                        'num_layers': 4,
-                        'dropout': 0.3
+                        'seq_length': seq_length, 'num_epochs': num_epochs,
+                        'batch_size': batch_size, 'learning_rate': learning_rate,
+                        'num_heads': 8, 'num_layers': 4, 'dropout': 0.3
                     }
 
                     progress_bar = st.progress(0)
@@ -1659,14 +1563,10 @@ def page_train(lang):
 
                     torch.save({
                         'model_state_dict': model.state_dict(),
-                        'scaler_X': scaler_X,
-                        'scaler_y': scaler_y,
-                        'feature_names': feature_names,
-                        'seq_length': seq_length,
-                        'input_dim': len(feature_names),
-                        'config': config,
-                        'train_losses': train_losses,
-                        'val_losses': val_losses,
+                        'scaler_X': scaler_X, 'scaler_y': scaler_y,
+                        'feature_names': feature_names, 'seq_length': seq_length,
+                        'input_dim': len(feature_names), 'config': config,
+                        'train_losses': train_losses, 'val_losses': val_losses,
                         'rated_capacity': rated_cap
                     }, model_path)
 
@@ -1681,18 +1581,15 @@ def page_train(lang):
                     )
 
                     with st.spinner(
-                            " SHAP分析计算中，请稍等..." if lang == 'zh' else " Computing SHAP analysis, please wait..."):
+                            " SHAP分析计算中..." if lang == 'zh' else " Computing SHAP analysis..."):
                         importance, shap_vals, _, _ = calculate_shap_values(
                             model, dataset, scaler_X, scaler_y, device
                         )
 
                     st.session_state.train_results = {
-                        'predictions': preds,
-                        'actuals': acts,
-                        'feature_importance': importance,
-                        'shap_values': shap_vals,
-                        'feature_names': feature_names,
-                        'features_scaled': feat_scaled,
+                        'predictions': preds, 'actuals': acts,
+                        'feature_importance': importance, 'shap_values': shap_vals,
+                        'feature_names': feature_names, 'features_scaled': feat_scaled,
                     }
 
             except Exception as e:
@@ -1713,12 +1610,10 @@ def page_predict(lang):
 
     with col1:
         st.markdown('<div class="card">', unsafe_allow_html=True)
-
         data_source = st.radio(
             T('data_source', lang),
             [T('load_from_repo', lang), T('upload_custom', lang)],
-            horizontal=True,
-            key='predict_data_source'
+            horizontal=True, key='predict_data_source'
         )
 
         test_file = None
@@ -1727,10 +1622,8 @@ def page_predict(lang):
             data_files = get_data_files()
             if data_files:
                 test_file = st.selectbox(
-                    T('upload_test', lang),
-                    data_files,
-                    format_func=lambda x: os.path.basename(x),
-                    key='predict_data_select'
+                    T('upload_test', lang), data_files,
+                    format_func=lambda x: os.path.basename(x), key='predict_data_select'
                 )
             else:
                 st.warning(T('no_data', lang))
@@ -1748,8 +1641,7 @@ def page_predict(lang):
         model_source = st.radio(
             T('model_source', lang),
             [T('load_from_repo', lang), T('upload_custom', lang)],
-            horizontal=True,
-            key='predict_model_source'
+            horizontal=True, key='predict_model_source'
         )
 
         selected_model = None
@@ -1759,8 +1651,7 @@ def page_predict(lang):
             model_files = get_model_files()
             if model_files:
                 selected_model = st.selectbox(
-                    T('select_model', lang),
-                    model_files,
+                    T('select_model', lang), model_files,
                     format_func=lambda x: os.path.basename(x)
                 )
             else:
@@ -1770,12 +1661,8 @@ def page_predict(lang):
 
         target_col = st.text_input(T('target_col', lang), value='capacity', key='predict_target')
         rated_cap = st.number_input(
-            T('rated_capacity', lang),
-            value=2.0,
-            min_value=0.1,
-            max_value=1000.0,
-            step=0.1,
-            key='predict_cap'
+            T('rated_capacity', lang), value=2.0, min_value=0.1, max_value=1000.0,
+            step=0.1, key='predict_cap'
         )
 
         st.markdown('</div>', unsafe_allow_html=True)
@@ -1792,7 +1679,6 @@ def page_predict(lang):
                 with st.spinner(T('processing', lang)):
                     device = get_device()
 
-                    # Load model
                     if model_source == T('load_from_repo', lang):
                         model, ckpt = load_model_file(selected_model, device)
                     else:
@@ -1803,7 +1689,6 @@ def page_predict(lang):
                     seq_length = int(ckpt.get('seq_length', 12))
                     rated_cap_use = get_rated_capacity(ckpt, rated_cap)
 
-                    # Read test data
                     test_df = read_csv(test_file)
                     if test_df is None:
                         st.error("Could not read test CSV.")
@@ -1816,10 +1701,8 @@ def page_predict(lang):
                     if avail_drops:
                         test_df = test_df.drop(avail_drops, axis=1)
 
-                    # Feature column selection
                     feature_names = ckpt.get('feature_names', None)
                     input_dim = int(ckpt.get("input_dim", 0))
-
                     exclude = {target_col, "SOH"}
                     cand = [c for c in test_df.columns
                             if c not in exclude and pd.api.types.is_numeric_dtype(test_df[c])]
@@ -1829,18 +1712,16 @@ def page_predict(lang):
 
                     if not use_ckpt_cols:
                         if input_dim <= 0:
-                            st.error("Model missing input_dim, cannot auto-select feature columns.")
+                            st.error("Model missing input_dim.")
                             return
                         if len(cand) < input_dim:
-                            st.error(f"CSV has insufficient numeric columns: need {input_dim}, found {len(cand)}.")
+                            st.error(f"CSV has insufficient columns: need {input_dim}, found {len(cand)}.")
                             return
                         feature_names = cand[:input_dim]
                         ckpt["feature_names"] = feature_names
-                        st.warning(f"Legacy model without feature_names, auto-selected {len(feature_names)} columns.")
 
                     test_features = test_df[feature_names].copy()
                     test_labels = test_df['SOH']
-
                     test_features = test_features.replace([np.inf, -np.inf], np.nan).fillna(0)
                     test_labels = test_labels.replace([np.inf, -np.inf], np.nan).fillna(0)
 
@@ -1849,18 +1730,15 @@ def page_predict(lang):
                     )
 
                     with st.spinner(
-                            " SHAP分析计算中，请稍等..." if lang == 'zh' else "🔄 Computing SHAP analysis, please wait..."):
+                            " SHAP分析计算中..." if lang == 'zh' else " Computing SHAP analysis..."):
                         importance, shap_vals, _, _ = calculate_shap_values(
                             model, dataset, scaler_X, scaler_y, device
                         )
 
                     st.session_state.predict_results = {
-                        'predictions': preds,
-                        'actuals': acts,
-                        'feature_importance': importance,
-                        'shap_values': shap_vals,
-                        'feature_names': feature_names,
-                        'features_scaled': feat_scaled,
+                        'predictions': preds, 'actuals': acts,
+                        'feature_importance': importance, 'shap_values': shap_vals,
+                        'feature_names': feature_names, 'features_scaled': feat_scaled,
                     }
 
                     st.success(T('prediction_complete', lang))
@@ -1875,10 +1753,10 @@ def page_predict(lang):
         selected = st.slider("Select Cycle", 0, len(results['predictions']) - 1, 0, key='predict_cycle')
         render_results(results, selected, lang)
 
+
 def page_about(lang):
     st.markdown(f'<div class="section-header">{T("about_title", lang)}</div>', unsafe_allow_html=True)
 
-    # Main description
     st.markdown(f"""
     <div class="card">
         <p style="color: #5D6D7E; margin-bottom: 1.5rem; font-size: 1rem; line-height: 1.6;">
@@ -1887,36 +1765,34 @@ def page_about(lang):
     </div>
     """, unsafe_allow_html=True)
 
-    # Model Architecture Card
     st.markdown("""
     <div class="card">
         <h4 style="margin: 0 0 0.8rem 0; color: #2C3E50; font-size: 1.1rem;">
-            CBAM-CNN-Transformer Model
+            CCT-Net Architecture
         </h4>
         <p style="margin: 0; color: #5D6D7E; font-size: 0.95rem; line-height: 1.5;">
             A hybrid deep learning architecture combining Convolutional Neural Networks (CNN) with 
             Convolutional Block Attention Module (CBAM) and Transformer encoder for accurate 
-            State of Health (SOH) prediction. The model captures both local patterns through 
-            CNN layers and global dependencies through self-attention mechanisms.
+            State of Health (SOH) prediction. CNN captures local feature patterns, CBAM adaptively 
+            enhances critical features, and Transformer models long-range degradation dependencies.
         </p>
     </div>
     """, unsafe_allow_html=True)
 
-    # SHAP Card
     st.markdown("""
     <div class="card">
         <h4 style="margin: 0 0 0.8rem 0; color: #2C3E50; font-size: 1.1rem;">
             SHAP Interpretability
         </h4>
         <p style="margin: 0; color: #5D6D7E; font-size: 0.95rem; line-height: 1.5;">
-            SHAP (SHapley Additive exPlanations) values provide transparent and interpretable 
-            predictions. Understand which features contribute most to each prediction, enabling 
-            trust and actionable insights for battery management decisions.
+            SHAP (SHapley Additive exPlanations) values quantify each feature's contribution 
+            to SOH predictions. The analysis reveals feature importance rankings and their 
+            evolution across degradation stages, supporting transparent and interpretable 
+            battery health assessment.
         </p>
     </div>
     """, unsafe_allow_html=True)
 
-    # Features Card
     st.markdown("""
     <div class="card">
         <h4 style="margin: 0 0 0.8rem 0; color: #2C3E50; font-size: 1.1rem;">
@@ -1924,8 +1800,8 @@ def page_about(lang):
         </h4>
         <ul style="margin: 0; color: #5D6D7E; font-size: 0.95rem; line-height: 1.8; padding-left: 1.2rem;">
             <li>Real-time SOH prediction with high accuracy</li>
-            <li>Feature importance visualization</li>
-            <li>Interactive SHAP analysis (Waterfall, Beeswarm plots)</li>
+            <li>Feature importance ranking visualization</li>
+            <li>SHAP analysis: value distribution, decision decomposition, feature dependency</li>
             <li>Support for multiple battery datasets</li>
             <li>Model training and evaluation interface</li>
             <li>Export predictions to CSV</li>
@@ -1933,14 +1809,13 @@ def page_about(lang):
     </div>
     """, unsafe_allow_html=True)
 
-    # Repository Structure Card
     st.markdown("""
     <div class="card">
         <h4 style="margin: 0 0 0.8rem 0; color: #2C3E50; font-size: 1.1rem;">
             Repository Structure
         </h4>
         <pre style="background: #F5F7F9; padding: 1rem; border-radius: 6px; font-size: 0.85rem; color: #2C3E50; overflow-x: auto;">
-├── app.py              # Main Streamlit application
+├── app_main.py         # Main Streamlit application
 ├── data/               # Place your CSV data files here
 │   └── *.csv
 ├── saved_models/       # Trained model checkpoints
@@ -1950,13 +1825,13 @@ def page_about(lang):
     </div>
     """, unsafe_allow_html=True)
 
-    # Version info
     st.markdown("""
     <div style="text-align: center; margin-top: 2rem; color: #7F8C9A; font-size: 0.85rem;">
-        <p>Battery Health Monitoring System v1.0</p>
-        <p>Built with Streamlit • PyTorch • SHAP</p>
+        <p>Battery Health Monitoring System v1.1</p>
+        <p>Built with Streamlit · PyTorch · SHAP</p>
     </div>
     """, unsafe_allow_html=True)
+
 
 def main():
     load_css()
@@ -1974,7 +1849,6 @@ def main():
     page = st.session_state.page
     screenshot_mode = st.session_state.screenshot_mode
 
-    # Apply screenshot mode class to body
     if screenshot_mode:
         st.markdown(
             '<style>.main { padding-top: 0 !important; } .block-container { padding-top: 1rem !important; }</style>',
@@ -1982,43 +1856,35 @@ def main():
 
     render_nav(lang)
 
-    # Navigation buttons (hidden in screenshot mode)
     if not screenshot_mode:
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
+        col1, col2, col3, col4, col5 = st.columns(5)
 
         with col1:
             if st.button(T('nav_demo', lang), key='btn_demo', use_container_width=True):
                 st.session_state.page = 'demo'
                 st.rerun()
-
         with col2:
             if st.button(T('nav_train', lang), key='btn_train', use_container_width=True):
                 st.session_state.page = 'train'
                 st.rerun()
-
         with col3:
             if st.button(T('nav_predict', lang), key='btn_predict', use_container_width=True):
                 st.session_state.page = 'predict'
                 st.rerun()
-
         with col4:
             if st.button(T('nav_about', lang), key='btn_about', use_container_width=True):
                 st.session_state.page = 'about'
                 st.rerun()
-
         with col5:
             lang_label = "English" if lang == 'zh' else "中文"
             if st.button(lang_label, key='btn_lang', use_container_width=True):
                 st.session_state.lang = 'en' if lang == 'zh' else 'zh'
                 st.rerun()
 
-
-
         st.markdown(f"<hr style='margin: 1rem 0; border: none; border-top: 1px solid {COLORS['border']};'>",
                     unsafe_allow_html=True)
     else:
-        # Show exit button in screenshot mode
-        if st.button("✕ Exit Screenshot Mode", key='btn_exit_screenshot'):
+        if st.button("Exit Screenshot Mode", key='btn_exit_screenshot'):
             st.session_state.screenshot_mode = False
             st.rerun()
 
