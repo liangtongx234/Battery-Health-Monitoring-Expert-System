@@ -25,6 +25,7 @@ except ImportError:
 
 warnings.filterwarnings("ignore")
 
+
 st.set_page_config(
     page_title="Battery Health Monitor",
     page_icon="battery",
@@ -40,6 +41,7 @@ MODELS_DIR = os.path.join(BASE_DIR, 'saved_models')
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(MODELS_DIR, exist_ok=True)
 
+
 COLORS = {
     'primary': '#5B7C99',
     'primary_light': '#7A9BB8',
@@ -54,7 +56,6 @@ COLORS = {
     'bg': '#F5F7F9',
     'bg_card': '#FFFFFF'
 }
-
 
 LANG = {
     "en": {
@@ -353,6 +354,7 @@ def load_css():
     </style>
     """, unsafe_allow_html=True)
 
+
 class ChannelAttention(nn.Module):
     def __init__(self, in_channels, reduction=16):
         super(ChannelAttention, self).__init__()
@@ -493,7 +495,6 @@ class CBAMCNNTransformer(nn.Module):
         out = self.fc_out(pooled_features)
         return out.squeeze(1)
 
-
 def set_seed(seed: int = 42):
     random.seed(seed)
     np.random.seed(seed)
@@ -533,6 +534,7 @@ class BatteryDataset(Dataset):
         return self.features[idx:idx + self.seq_length], self.labels[idx + self.seq_length - 1]
 
 
+
 def get_data_files():
     files = []
     if os.path.exists(DATA_DIR):
@@ -567,7 +569,6 @@ def read_csv(file_or_path):
 
 
 class IdentityScaler:
-    """Dummy scaler that returns input unchanged."""
 
     def fit(self, X):
         return self
@@ -578,11 +579,9 @@ class IdentityScaler:
     def inverse_transform(self, X):
         return X
 
+
 def _infer_input_dim_from_state_dict(sd: dict):
-    """
-    Infer input_dim from the first Conv1d layer weight.
-    Conv1d.weight shape: [out_channels, in_channels, kernel_size]
-    """
+
     possible_keys = [
         "cnn_block1.0.weight",  # New naming 
         "cnn1.0.weight",  # Legacy naming
@@ -598,7 +597,6 @@ def _infer_input_dim_from_state_dict(sd: dict):
 
 
 def _remap_legacy_state_dict(sd: dict) -> dict:
-    """Remap legacy model key names to current architecture names."""
     out = {}
     for k, v in sd.items():
         nk = k
@@ -629,12 +627,7 @@ def _remap_legacy_state_dict(sd: dict) -> dict:
 
 
 def load_model_file(path_or_file, device):
-    """
-    Load model with full backward compatibility for legacy checkpoints.
 
-    FIXED: Now properly handles models without 'input_dim' key by inferring
-    from model weights or feature_names.
-    """
     ckpt = torch.load(path_or_file, map_location=device, weights_only=False)
 
     # Handle different checkpoint formats
@@ -646,7 +639,6 @@ def load_model_file(path_or_file, device):
 
     # Remap legacy key names
     sd = _remap_legacy_state_dict(sd_raw)
-
 
     input_dim = None
 
@@ -723,8 +715,6 @@ def load_model_file(path_or_file, device):
     return model, ckpt
 
 
-
-# Demo Data 
 
 def generate_demo_data():
     np.random.seed(42)
@@ -1064,6 +1054,9 @@ def mean_absolute_percentage_error(y_true, y_pred):
         return 0.0
     return np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100
 
+# ============================================================================
+# Training & Prediction Functions
+# ============================================================================
 def train_model(train_features, train_labels, config, progress_cb=None):
     seed = int(config.get('seed', 42))
     set_seed(seed)
@@ -1229,13 +1222,14 @@ def calculate_shap_values(model, dataset, scaler_X, scaler_y, device, n_samples=
 
     max_samples = min(n_samples, len(dataset))
 
+    # 准备数据
     X_data = []
     for idx in range(max_samples):
         seq_X, _ = dataset[idx]
         X_data.append(seq_X.numpy())
     X_data = np.array(X_data)
 
-
+    # 尝试使用真正的SHAP
     if SHAP_AVAILABLE:
         try:
             model.eval()
@@ -1279,6 +1273,7 @@ def calculate_shap_values(model, dataset, scaler_X, scaler_y, device, n_samples=
         except Exception as e:
             print(f"SHAP GradientExplainer failed: {e}, falling back to perturbation method")
 
+    # 回退方法：扰动分析
     feature_importance = np.zeros(n_features)
     shap_values_all = np.zeros((max_samples, n_features))
 
@@ -1320,7 +1315,6 @@ def render_nav(lang):
         <p class="nav-subtitle">{T('subtitle', lang)}</p>
     </div>
     """, unsafe_allow_html=True)
-
 
 
 def render_results(results, selected_cycle, lang):
@@ -1556,7 +1550,6 @@ def page_demo(lang):
     render_results(results, selected_cycle, lang)
 
 
-
 def page_train(lang):
     st.markdown(f'<div class="section-header">{T("train_title", lang)}</div>', unsafe_allow_html=True)
 
@@ -1723,7 +1716,6 @@ def page_train(lang):
         results = st.session_state.train_results
         selected = st.slider("Select Cycle", 0, len(results['predictions']) - 1, 0, key='train_cycle')
         render_results(results, selected, lang)
-
 
 
 def page_predict(lang):
@@ -1895,7 +1887,6 @@ def page_predict(lang):
         selected = st.slider("Select Cycle", 0, len(results['predictions']) - 1, 0, key='predict_cycle')
         render_results(results, selected, lang)
 
-
 def page_about(lang):
     st.markdown(f'<div class="section-header">{T("about_title", lang)}</div>', unsafe_allow_html=True)
 
@@ -1979,15 +1970,11 @@ def page_about(lang):
     </div>
     """, unsafe_allow_html=True)
 
-
-# ============================================================================
-# Main
-# ============================================================================
 def main():
     load_css()
 
     if 'lang' not in st.session_state:
-        st.session_state.lang = 'en'  # Default to English for publication
+        st.session_state.lang = 'en' 
     if 'page' not in st.session_state:
         st.session_state.page = 'demo'
     if 'demo_cycle' not in st.session_state:
