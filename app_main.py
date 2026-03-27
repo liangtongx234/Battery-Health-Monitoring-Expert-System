@@ -18,6 +18,7 @@ from datetime import datetime
 import glob
 import random
 import copy
+import shap
 try:
     import shap
     SHAP_AVAILABLE = True
