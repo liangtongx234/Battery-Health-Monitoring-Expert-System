@@ -40,11 +40,28 @@ DATA_DIR = os.path.join(BASE_DIR, 'data')
 MODELS_DIR = os.path.join(BASE_DIR, 'saved_models')
 
 SHAP_DATA_DIR = os.path.join(BASE_DIR, 'shap_data')
-BATTERY_TYPE  = 'Sim'            
 
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(MODELS_DIR, exist_ok=True)
 os.makedirs(SHAP_DATA_DIR, exist_ok=True)
+
+
+def detect_battery_type(filepath):
+
+    if filepath is None:
+        return None
+    if isinstance(filepath, str):
+        basename = os.path.basename(filepath)
+    else:
+        basename = getattr(filepath, 'name', '')
+    name_no_ext = os.path.splitext(basename)[0]
+    parts = name_no_ext.split('_')
+    if parts:
+        prefix = parts[0]
+        check_file = os.path.join(SHAP_DATA_DIR, f"shap_values_{prefix}.csv")
+        if os.path.isfile(check_file):
+            return prefix
+    return None
 
 COLORS = {
     'primary': '#5B7C99',
@@ -679,6 +696,7 @@ def generate_demo_results():
         'feature_importance': importance, 'shap_values': shap_vals,
         'feature_names': feature_names,
         'features_scaled': np.random.randn(len(predictions), len(feature_names)),
+        'shap_source': 'computed',
         'df': df, 'source': 'demo'
     }
 
@@ -727,6 +745,7 @@ def mean_absolute_percentage_error(y_true, y_pred):
     if mask.sum() == 0: return 0.0
     return np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100
 
+
 def beeswarm_jitter(values, max_jitter=0.40, n_bins=60):
 
     values = np.asarray(values, dtype=float)
@@ -752,7 +771,6 @@ def beeswarm_jitter(values, max_jitter=0.40, n_bins=60):
         offsets[i] = np.random.uniform(-jitter_range, jitter_range)
 
     return offsets
-
 
 def plot_feature_importance(names, values):
     setup_plot()
@@ -838,9 +856,7 @@ def plot_waterfall(names, shap_vals, base_val, suffix=""):
     return fig
 
 
-
 def plot_beeswarm(names, shap_vals, feat_vals):
-
     CMAP_BEE = LinearSegmentedColormap.from_list(
         'bee_blues', ['#deebf7', '#9ecae1', '#4292c6', '#2171b5', '#084594'])
     SPINE_COL = '#5b9bd5'
@@ -876,6 +892,7 @@ def plot_beeswarm(names, shap_vals, feat_vals):
 
     for rank, fi in enumerate(sorted_idx):
         sv = shap_vals[:, fi]
+
         if feat_vals is not None and fi < feat_vals.shape[1]:
             fv = feat_vals[:len(sv), fi]
         else:
@@ -883,7 +900,7 @@ def plot_beeswarm(names, shap_vals, feat_vals):
         fv_min, fv_max = fv.min(), fv.max()
         fv_norm = (fv - fv_min) / (fv_max - fv_min + 1e-12)
 
-        # y 方向密度感知抖动
+
         y_off = beeswarm_jitter(sv, max_jitter=0.40, n_bins=60)
 
         ax.scatter(sv, rank + y_off,
@@ -902,7 +919,7 @@ def plot_beeswarm(names, shap_vals, feat_vals):
         fontsize=7.8, fontweight='bold', color='black')
     ax.set_xlabel('SHAP Value', fontsize=9, fontweight='bold')
     ax.set_ylabel('Features',   fontsize=9, fontweight='bold')
-    ax.set_title(f'Feature impact on SOH – {BATTERY_TYPE}',
+    ax.set_title('Feature impact on SOH',
                  fontsize=9, fontweight='bold', loc='left', pad=4)
 
 
@@ -984,7 +1001,6 @@ def plot_training_curve(train_loss, val_loss):
     ax.spines['right'].set_visible(False)
     plt.tight_layout()
     return fig
-
 
 
 
@@ -1117,6 +1133,8 @@ def predict_with_model(model, test_features, test_labels, scaler_X, scaler_y,
     return preds * 100, acts * 100, X_scaled, dataset
 
 
+
+
 def load_precomputed_shap(shap_data_dir: str, battery_type: str):
     files = {
         "shap":       os.path.join(shap_data_dir, f"shap_values_{battery_type}.csv"),
@@ -1141,7 +1159,7 @@ def load_precomputed_shap(shap_data_dir: str, battery_type: str):
             [imp_map.get(f, 0.0) for f in feature_names])
         print(f"[load_precomputed_shap] Loaded {len(shap_values)} samples, "
               f"{len(feature_names)} features")
-        return feature_importance_norm, shap_values, feature_values, feature_names
+        return feature_importance_norm, shap_values, feature_values, feature_names, 'precomputed'
     except Exception as e:
         print(f"[load_precomputed_shap] Error: {e}")
         return None
@@ -1153,12 +1171,11 @@ def calculate_shap_values(
     shap_data_dir=None, battery_type=None,
 ):
 
-
+    # ── 0. 尝试加载预计算结果 ──
     if shap_data_dir and battery_type:
         result = load_precomputed_shap(shap_data_dir, battery_type)
         if result is not None:
             return result
-
 
     np.random.seed(42)
     torch.manual_seed(42)
@@ -1178,7 +1195,6 @@ def calculate_shap_values(
     X_explain = np.array(X_explain)
     X_data_3d = np.array(X_data_3d)
 
-
     def model_predict(x_flat):
         model.eval()
         with torch.no_grad():
@@ -1189,6 +1205,7 @@ def calculate_shap_values(
                 if xb.size(0) > 0:
                     outputs.extend(model(xb).cpu().numpy())
             return np.array(outputs) if outputs else np.zeros(x_flat.shape[0])
+
     bg_size_actual = min(bg_size, max_samples // 3)
     background     = X_explain[:bg_size_actual]
     print(f"[SHAP] KernelExplainer: {max_samples} samples, "
@@ -1196,14 +1213,13 @@ def calculate_shap_values(
     explainer   = shap.KernelExplainer(model_predict, background)
     shap_values = explainer.shap_values(X_explain, nsamples=nsamples_kernel)
 
-
     shap_vals_3d  = shap_values.reshape(max_samples, seq_length, n_features)
     shap_vals_agg = shap_vals_3d.mean(axis=1)
     feat_importance = np.abs(shap_vals_agg).mean(axis=0)
     mx = feat_importance.max()
     feature_importance_norm = (feat_importance / mx) if mx > 0 else feat_importance
 
-    return feature_importance_norm, shap_vals_agg, X_data_3d, feature_names
+    return feature_importance_norm, shap_vals_agg, X_data_3d, feature_names, 'computed'
 
 
 
@@ -1230,7 +1246,6 @@ def render_results(results, selected_cycle, lang):
 
     selected_cycle = int(np.clip(selected_cycle, 0, len(preds) - 1))
 
-    # --- Metrics ---
     col1, col2, col3, col4 = st.columns([1.5, 0.8, 0.8, 0.8])
     with col1:
         current_soh = preds[selected_cycle]
@@ -1264,43 +1279,46 @@ def render_results(results, selected_cycle, lang):
             <div class="metric-label">{T('mape', lang)}</div>
         </div>""", unsafe_allow_html=True)
 
-    # --- Prediction trend ---
     st.markdown(f'<div class="section-header">{T("prediction_trend", lang)}</div>',
                 unsafe_allow_html=True)
     fig_trend = plot_prediction_trend(acts, preds, selected_cycle)
     st.pyplot(fig_trend); plt.close(fig_trend)
 
-    # --- SHAP ---
+
     st.markdown(f'<div class="section-header">{T("shap_title", lang)}</div>',
                 unsafe_allow_html=True)
 
-    col1, col2 = st.columns(2)
-    with col1:
-        fig1 = plot_feature_importance(names, importance)
-        st.pyplot(fig1); plt.close(fig1)
-    with col2:
-        idx = min(selected_cycle, shap_vals.shape[0] - 1) \
-              if shap_vals.ndim == 2 and shap_vals.shape[0] > 0 else 0
-        cycle_shap = shap_vals[idx] if shap_vals.ndim == 2 else np.zeros(len(names))
-        base_val = float(np.mean(acts))
-        fig2 = plot_waterfall(names, cycle_shap, base_val,
-                              f"(Cycle {selected_cycle + 1})")
-        st.pyplot(fig2); plt.close(fig2)
+    shap_source = results.get('shap_source', 'computed')
 
-    col1, col2 = st.columns(2)
-    with col1:
+    if shap_source == 'computed':
+        col1, col2 = st.columns(2)
+        with col1:
+            fig1 = plot_feature_importance(names, importance)
+            st.pyplot(fig1); plt.close(fig1)
+        with col2:
+            idx = min(selected_cycle, shap_vals.shape[0] - 1) \
+                  if shap_vals.ndim == 2 and shap_vals.shape[0] > 0 else 0
+            cycle_shap = shap_vals[idx] if shap_vals.ndim == 2 else np.zeros(len(names))
+            base_val = float(np.mean(acts))
+            fig2 = plot_waterfall(names, cycle_shap, base_val,
+                                  f"(Cycle {selected_cycle + 1})")
+            st.pyplot(fig2); plt.close(fig2)
+
         fig3 = plot_beeswarm(
             names, shap_vals,
             feat_scaled[:len(shap_vals)] if feat_scaled is not None else None)
         st.pyplot(fig3); plt.close(fig3)
-    with col2:
-        st.markdown(
-            f'<div class="section-header">{T("dependency_plot", lang)}</div>',
-            unsafe_allow_html=True)
-        fig4 = plot_dependency(
-            names, shap_vals,
-            feat_scaled[:len(shap_vals)] if feat_scaled is not None else None)
-        st.pyplot(fig4); plt.close(fig4)
+    else:
+        # 预计算模式（Sim）：只显示 重要性 + 蜂群图，不显示瀑布图和依赖图
+        col1, col2 = st.columns(2)
+        with col1:
+            fig1 = plot_feature_importance(names, importance)
+            st.pyplot(fig1); plt.close(fig1)
+        with col2:
+            fig3 = plot_beeswarm(
+                names, shap_vals,
+                feat_scaled[:len(shap_vals)] if feat_scaled is not None else None)
+            st.pyplot(fig3); plt.close(fig3)
 
     # --- Download ---
     st.markdown("<br>", unsafe_allow_html=True)
@@ -1313,7 +1331,6 @@ def render_results(results, selected_cycle, lang):
     csv = results_df.to_csv(index=False)
     st.download_button(label=T('download_results', lang), data=csv,
                        file_name="soh_predictions.csv", mime="text/csv")
-
 
 
 def page_demo(lang):
@@ -1381,14 +1398,21 @@ def page_demo(lang):
                         with st.spinner(
                             "SHAP分析计算中..." if lang == 'zh'
                             else "Computing SHAP analysis..."):
-                            importance, shap_vals, _, _ = calculate_shap_values(
-                                model, dataset, scaler_X, scaler_y, device,
-                                n_samples=500,
-                                bg_size=100,
-                                nsamples_kernel=200,
-                                shap_data_dir=SHAP_DATA_DIR,   # ← 读缓存
-                                battery_type=BATTERY_TYPE,      # ← 读缓存
-                            )
+                            # 自动检测电池类型，仅 Sim 用预计算缓存
+                            detected_type = detect_battery_type(data_files[0])
+                            if detected_type:
+                                importance, shap_vals, _, _, shap_source = calculate_shap_values(
+                                    model, dataset, scaler_X, scaler_y, device,
+                                    n_samples=500, bg_size=100, nsamples_kernel=200,
+                                    shap_data_dir=SHAP_DATA_DIR,
+                                    battery_type=detected_type,
+                                )
+                            else:
+                                # 非 Sim 数据 → 200 样本实时计算
+                                importance, shap_vals, _, _, shap_source = calculate_shap_values(
+                                    model, dataset, scaler_X, scaler_y, device,
+                                    n_samples=200, bg_size=50, nsamples_kernel=200,
+                                )
 
                         st.session_state.demo_results = {
                             'predictions': preds, 'actuals': acts,
@@ -1396,6 +1420,7 @@ def page_demo(lang):
                             'shap_values': shap_vals,
                             'feature_names': feature_names,
                             'features_scaled': feat_scaled,
+                            'shap_source': shap_source,
                             'df': df, 'source': 'repo'
                         }
             except Exception as e:
@@ -1420,8 +1445,6 @@ def page_demo(lang):
         st.session_state.demo_cycle = selected_cycle
 
     render_results(results, selected_cycle, lang)
-
-
 
 
 def page_train(lang):
@@ -1550,9 +1573,9 @@ def page_train(lang):
                     with st.spinner(
                         "SHAP分析计算中..." if lang == 'zh'
                         else "Computing SHAP analysis..."):
-                        importance, shap_vals, _, _ = calculate_shap_values(
+                        importance, shap_vals, _, _, shap_source = calculate_shap_values(
                             model, dataset, scaler_X, scaler_y, device,
-                            n_samples=500, bg_size=100, nsamples_kernel=200,
+                            n_samples=200, bg_size=50, nsamples_kernel=200,
                             # 训练新模型 → 不传 shap_data_dir，强制实时计算
                         )
 
@@ -1562,6 +1585,7 @@ def page_train(lang):
                         'shap_values': shap_vals,
                         'feature_names': feature_names,
                         'features_scaled': feat_scaled,
+                        'shap_source': shap_source,
                     }
             except Exception as e:
                 st.error(f"Error: {str(e)}")
@@ -1687,12 +1711,20 @@ def page_predict(lang):
                     with st.spinner(
                         "SHAP分析计算中..." if lang == 'zh'
                         else "Computing SHAP analysis..."):
-                        importance, shap_vals, _, _ = calculate_shap_values(
-                            model, dataset, scaler_X, scaler_y, device,
-                            n_samples=500, bg_size=100, nsamples_kernel=200,
-                            shap_data_dir=SHAP_DATA_DIR,   
-                            battery_type=BATTERY_TYPE,      
-                        )
+                        # 自动检测电池类型，仅匹配到预计算文件时用缓存
+                        detected_type = detect_battery_type(test_file)
+                        if detected_type:
+                            importance, shap_vals, _, _, shap_source = calculate_shap_values(
+                                model, dataset, scaler_X, scaler_y, device,
+                                n_samples=500, bg_size=100, nsamples_kernel=200,
+                                shap_data_dir=SHAP_DATA_DIR,
+                                battery_type=detected_type,
+                            )
+                        else:
+                            importance, shap_vals, _, _, shap_source = calculate_shap_values(
+                                model, dataset, scaler_X, scaler_y, device,
+                                n_samples=200, bg_size=50, nsamples_kernel=200,
+                            )
 
                     st.session_state.predict_results = {
                         'predictions': preds, 'actuals': acts,
@@ -1700,6 +1732,7 @@ def page_predict(lang):
                         'shap_values': shap_vals,
                         'feature_names': feature_names,
                         'features_scaled': feat_scaled,
+                        'shap_source': shap_source,
                     }
                     st.success(T('prediction_complete', lang))
             except Exception as e:
@@ -1764,7 +1797,6 @@ def page_about(lang):
 
 
 
-
 def main():
     load_css()
 
@@ -1803,9 +1835,10 @@ def main():
             lbl = "English" if lang == 'zh' else "中文"
             if st.button(lbl, key='btn_lang', use_container_width=True):
                 st.session_state.lang = 'en' if lang == 'zh' else 'zh'; st.rerun()
+        border_color = COLORS['border']
         st.markdown(
-            f'<hr style="margin:1rem 0;border:none;'
-            f'border-top:1px solid {COLORS["border"]};">',
+            f"<hr style='margin:1rem 0;border:none;"
+            f"border-top:1px solid {border_color};'>",
             unsafe_allow_html=True)
     else:
         if st.button("Exit Screenshot Mode", key='btn_exit_screenshot'):
