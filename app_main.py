@@ -964,10 +964,10 @@ def plot_beeswarm(names, shap_vals, feat_vals):
     ax.set_yticklabels(
         [names[i] for i in sorted_idx],
         fontsize=7.8, fontweight='bold', color='black')
-    ax.set_xlabel('SHAP Value', fontsize=9, fontweight='bold')
-    ax.set_ylabel('Features',   fontsize=9, fontweight='bold')
-    ax.set_title('Feature impact on SOH',
-                 fontsize=9, fontweight='bold', loc='left', pad=4)
+    ax.set_xlabel('SHAP Value', fontsize=11, fontweight='600')
+    ax.set_ylabel('Features',   fontsize=11, fontweight='600')
+    ax.set_title('SHAP Value Distribution',
+                 fontsize=12, fontweight='700', pad=12)
 
     # 样式
     ax.set_facecolor(BG_COL)
@@ -1463,21 +1463,11 @@ def page_demo(lang):
                         with st.spinner(
                             "SHAP分析计算中..." if lang == 'zh'
                             else "Computing SHAP analysis..."):
-                            # 自动检测电池类型，仅 Sim 用预计算缓存
-                            detected_type = detect_battery_type(data_files[0])
-                            if detected_type:
-                                importance, shap_vals, _, _, shap_source = calculate_shap_values(
-                                    model, dataset, scaler_X, scaler_y, device,
-                                    n_samples=500, bg_size=100, nsamples_kernel=200,
-                                    shap_data_dir=SHAP_DATA_DIR,
-                                    battery_type=detected_type,
-                                )
-                            else:
-                                # 非 Sim 数据 → 200 样本实时计算
-                                importance, shap_vals, _, _, shap_source = calculate_shap_values(
-                                    model, dataset, scaler_X, scaler_y, device,
-                                    n_samples=200, bg_size=50, nsamples_kernel=200,
-                                )
+                            # Demo 页面始终实时计算，瀑布图才能跟随 cycle 变化
+                            importance, shap_vals, _, _, shap_source = calculate_shap_values(
+                                model, dataset, scaler_X, scaler_y, device,
+                                n_samples=200, bg_size=50, nsamples_kernel=200,
+                            )
 
                         st.session_state.demo_results = {
                             'predictions': preds, 'actuals': acts,
