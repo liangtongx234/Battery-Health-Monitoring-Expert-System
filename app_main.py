@@ -1487,14 +1487,24 @@ def page_demo(lang):
                             model, test_features, test_labels,
                             scaler_X, scaler_y, seq_length, device)
 
-                        with st.spinner(
-                            "SHAP分析计算中..." if lang == 'zh'
-                            else "Computing SHAP analysis..."):
-                            # Demo 页面始终实时计算，瀑布图才能跟随 cycle 变化
-                            importance, shap_vals, _, _, shap_source = calculate_shap_values(
-                                model, dataset, scaler_X, scaler_y, device,
-                                n_samples=200, bg_size=50, nsamples_kernel=200,
-                            )
+                        # Demo 页面直接读预计算 CSV，纯展示用，不做实时计算
+                        detected_type = detect_battery_type(data_files[0])
+                        precomputed = None
+                        if detected_type:
+                            precomputed = load_precomputed_shap(
+                                SHAP_DATA_DIR, detected_type)
+
+                        if precomputed is not None:
+                            importance, shap_vals, _, _, shap_source = precomputed
+                        else:
+                            # 没有预计算文件时才实时计算
+                            with st.spinner(
+                                "SHAP分析计算中..." if lang == 'zh'
+                                else "Computing SHAP analysis..."):
+                                importance, shap_vals, _, _, shap_source = calculate_shap_values(
+                                    model, dataset, scaler_X, scaler_y, device,
+                                    n_samples=200, bg_size=50, nsamples_kernel=200,
+                                )
 
                         st.session_state.demo_results = {
                             'predictions': preds, 'actuals': acts,
