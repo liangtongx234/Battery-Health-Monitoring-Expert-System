@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -11,7 +12,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import matplotlib.pyplot as plt
 import matplotlib
 from matplotlib.colors import LinearSegmentedColormap
-from mpl_toolkits.axes_grid1 import make_axes_locatable
+from mpl_toolkits.axes_grid1 import make_axes_locatable          # ← 新增
 import os
 import warnings
 from datetime import datetime
@@ -39,6 +40,14 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__)) if '__file__' in dir() els
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 MODELS_DIR = os.path.join(BASE_DIR, 'saved_models')
 
+# ═══════════════════════════════════════════════════════════════
+#  SHAP 预计算数据路径 & 电池类型
+#  ── 把论文代码输出的 4 个 CSV 放到此目录即可跳过重算 ──
+#  shap_values_{BATTERY_TYPE}.csv
+#  feature_values_{BATTERY_TYPE}.csv
+#  feature_importance_{BATTERY_TYPE}.csv
+#  soh_values_{BATTERY_TYPE}.csv
+# ═══════════════════════════════════════════════════════════════
 SHAP_DATA_DIR = os.path.join(BASE_DIR, 'shap_data')
 
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -47,17 +56,24 @@ os.makedirs(SHAP_DATA_DIR, exist_ok=True)
 
 
 def detect_battery_type(filepath):
-
+    """
+    从数据文件名自动检测电池类型。
+    例如 "Sim_001.csv" → "Sim", "CS2_35.csv" → "CS2"
+    返回 None 表示无法识别。
+    """
     if filepath is None:
         return None
     if isinstance(filepath, str):
         basename = os.path.basename(filepath)
     else:
         basename = getattr(filepath, 'name', '')
+    # 取文件名中下划线或数字之前的前缀
     name_no_ext = os.path.splitext(basename)[0]
+    # 按 '_' 分割取第一段作为电池类型前缀
     parts = name_no_ext.split('_')
     if parts:
         prefix = parts[0]
+        # 检查 shap_data 目录中是否有对应的预计算文件
         check_file = os.path.join(SHAP_DATA_DIR, f"shap_values_{prefix}.csv")
         if os.path.isfile(check_file):
             return prefix
@@ -354,6 +370,8 @@ def load_css():
     """, unsafe_allow_html=True)
 
 
+# ================================ 模型定义 ================================
+
 class ChannelAttention(nn.Module):
     def __init__(self, in_channels, reduction=16):
         super(ChannelAttention, self).__init__()
@@ -484,6 +502,8 @@ class CBAMCNNTransformer(nn.Module):
         pooled = pooled.squeeze(1)
         return self.fc_out(pooled).squeeze(1)
 
+
+# ================================ 工具函数 ================================
 
 def set_seed(seed: int = 42):
     random.seed(seed)
@@ -701,6 +721,8 @@ def generate_demo_results():
     }
 
 
+# ================================ 辅助 ================================
+
 def T(key, lang):
     return LANG.get(lang, LANG['en']).get(key, key)
 
@@ -746,8 +768,15 @@ def mean_absolute_percentage_error(y_true, y_pred):
     return np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100
 
 
-def beeswarm_jitter(values, max_jitter=0.40, n_bins=60):
+# ======================================================================
+#  蜂群图抖动函数（与论文可视化代码一致）
+# ======================================================================
 
+def beeswarm_jitter(values, max_jitter=0.40, n_bins=60):
+    """
+    为蜂群图生成 y 轴方向的抖动偏移。
+    密度越高的区域抖动越大，模拟蜂群堆叠效果。
+    """
     values = np.asarray(values, dtype=float)
     n = len(values)
     offsets = np.zeros(n)
@@ -762,6 +791,7 @@ def beeswarm_jitter(values, max_jitter=0.40, n_bins=60):
     bin_idx   = np.digitize(values, bin_edges) - 1
     bin_idx   = np.clip(bin_idx, 0, n_bins - 1)
 
+    # 每个 bin 中的样本数
     counts = np.bincount(bin_idx, minlength=n_bins)
     max_count = counts.max() if counts.max() > 0 else 1
 
@@ -771,6 +801,11 @@ def beeswarm_jitter(values, max_jitter=0.40, n_bins=60):
         offsets[i] = np.random.uniform(-jitter_range, jitter_range)
 
     return offsets
+
+
+# ======================================================================
+#  绘图函数
+# ======================================================================
 
 def plot_feature_importance(names, values):
     setup_plot()
@@ -856,7 +891,19 @@ def plot_waterfall(names, shap_vals, base_val, suffix=""):
     return fig
 
 
+# ======================================================================
+#  蜂群图 — 与论文可视化代码保持一致的配色和布局
+# ======================================================================
+
 def plot_beeswarm(names, shap_vals, feat_vals):
+    """
+    论文风格蜂群图：
+    - 蓝色系色带  #deebf7 → #084594
+    - 按特征重要性从上到下排列（最重要在最上方）
+    - 淡蓝背景 + 蓝色边框
+    - 使用 beeswarm_jitter 做密度感知抖动
+    """
+    # ── 论文配色 ──
     CMAP_BEE = LinearSegmentedColormap.from_list(
         'bee_blues', ['#deebf7', '#9ecae1', '#4292c6', '#2171b5', '#084594'])
     SPINE_COL = '#5b9bd5'
@@ -884,15 +931,15 @@ def plot_beeswarm(names, shap_vals, feat_vals):
     })
 
     n_feat = len(names)
-
+    # 按重要性排序（从小到大 → y=0 在底部为最不重要，最上面最重要）
     importance = np.abs(shap_vals).mean(axis=0)
-    sorted_idx = np.argsort(importance)
+    sorted_idx = np.argsort(importance)          # 升序：底部不重要，顶部重要
 
     fig, ax = plt.subplots(figsize=(10, max(5, n_feat * 0.45)))
 
     for rank, fi in enumerate(sorted_idx):
         sv = shap_vals[:, fi]
-
+        # 特征原始值 → 归一化到 [0, 1] 用于着色
         if feat_vals is not None and fi < feat_vals.shape[1]:
             fv = feat_vals[:len(sv), fi]
         else:
@@ -900,7 +947,7 @@ def plot_beeswarm(names, shap_vals, feat_vals):
         fv_min, fv_max = fv.min(), fv.max()
         fv_norm = (fv - fv_min) / (fv_max - fv_min + 1e-12)
 
-
+        # y 方向密度感知抖动
         y_off = beeswarm_jitter(sv, max_jitter=0.40, n_bins=60)
 
         ax.scatter(sv, rank + y_off,
@@ -909,10 +956,10 @@ def plot_beeswarm(names, shap_vals, feat_vals):
                    linewidths=0.10, edgecolors='white',
                    rasterized=True, zorder=2)
 
-
+    # 零线
     ax.axvline(0, color='#888888', lw=0.8, ls='--', alpha=0.85, zorder=1)
 
-
+    # y 轴标签
     ax.set_yticks(range(n_feat))
     ax.set_yticklabels(
         [names[i] for i in sorted_idx],
@@ -922,7 +969,7 @@ def plot_beeswarm(names, shap_vals, feat_vals):
     ax.set_title('Feature impact on SOH',
                  fontsize=9, fontweight='bold', loc='left', pad=4)
 
-
+    # 样式
     ax.set_facecolor(BG_COL)
     ax.grid(axis='x', lw=0.4, alpha=0.5, color='#c6dbef', zorder=0)
     for sp in ax.spines.values():
@@ -930,7 +977,7 @@ def plot_beeswarm(names, shap_vals, feat_vals):
         sp.set_color(SPINE_COL)
     ax.tick_params(colors='black', width=0.8)
 
-
+    # 颜色条（与论文一致，使用 make_axes_locatable）
     divider = make_axes_locatable(ax)
     cax = divider.append_axes('right', size='3%', pad=0.06)
     sm  = plt.cm.ScalarMappable(cmap=CMAP_BEE, norm=plt.Normalize(0, 1))
@@ -1003,6 +1050,7 @@ def plot_training_curve(train_loss, val_loss):
     return fig
 
 
+# ================================ 训练 & 推理 ================================
 
 def train_model(train_features, train_labels, config, progress_cb=None):
     seed = int(config.get('seed', 42))
@@ -1133,9 +1181,12 @@ def predict_with_model(model, test_features, test_labels, scaler_X, scaler_y,
     return preds * 100, acts * 100, X_scaled, dataset
 
 
-
+# ======================================================================
+#  SHAP 计算（KernelExplainer，与论文一致）
+# ======================================================================
 
 def load_precomputed_shap(shap_data_dir: str, battery_type: str):
+    """读取论文代码保存的 4 个 CSV 文件，秒级返回。"""
     files = {
         "shap":       os.path.join(shap_data_dir, f"shap_values_{battery_type}.csv"),
         "features":   os.path.join(shap_data_dir, f"feature_values_{battery_type}.csv"),
@@ -1170,13 +1221,17 @@ def calculate_shap_values(
     n_samples=500, bg_size=100, nsamples_kernel=200,
     shap_data_dir=None, battery_type=None,
 ):
-
+    """
+    与论文完全一致的 KernelExplainer SHAP 计算。
+    优先尝试读取预计算 CSV；找不到再实时计算。
+    """
     # ── 0. 尝试加载预计算结果 ──
     if shap_data_dir and battery_type:
         result = load_precomputed_shap(shap_data_dir, battery_type)
         if result is not None:
             return result
 
+    # ── 1. 采样 ──
     np.random.seed(42)
     torch.manual_seed(42)
     seq_length    = dataset.seq_length
@@ -1195,6 +1250,7 @@ def calculate_shap_values(
     X_explain = np.array(X_explain)
     X_data_3d = np.array(X_data_3d)
 
+    # ── 2. 模型包装器 ──
     def model_predict(x_flat):
         model.eval()
         with torch.no_grad():
@@ -1206,6 +1262,7 @@ def calculate_shap_values(
                     outputs.extend(model(xb).cpu().numpy())
             return np.array(outputs) if outputs else np.zeros(x_flat.shape[0])
 
+    # ── 3. KernelExplainer ──
     bg_size_actual = min(bg_size, max_samples // 3)
     background     = X_explain[:bg_size_actual]
     print(f"[SHAP] KernelExplainer: {max_samples} samples, "
@@ -1213,8 +1270,11 @@ def calculate_shap_values(
     explainer   = shap.KernelExplainer(model_predict, background)
     shap_values = explainer.shap_values(X_explain, nsamples=nsamples_kernel)
 
+    # ── 4. 按时间步聚合 ──
     shap_vals_3d  = shap_values.reshape(max_samples, seq_length, n_features)
     shap_vals_agg = shap_vals_3d.mean(axis=1)
+
+    # ── 5. 特征重要性 ──
     feat_importance = np.abs(shap_vals_agg).mean(axis=0)
     mx = feat_importance.max()
     feature_importance_norm = (feat_importance / mx) if mx > 0 else feat_importance
@@ -1222,6 +1282,7 @@ def calculate_shap_values(
     return feature_importance_norm, shap_vals_agg, X_data_3d, feature_names, 'computed'
 
 
+# ================================ 页面渲染 ================================
 
 def render_nav(lang):
     st.markdown(f"""
@@ -1246,6 +1307,7 @@ def render_results(results, selected_cycle, lang):
 
     selected_cycle = int(np.clip(selected_cycle, 0, len(preds) - 1))
 
+    # --- Metrics ---
     col1, col2, col3, col4 = st.columns([1.5, 0.8, 0.8, 0.8])
     with col1:
         current_soh = preds[selected_cycle]
@@ -1279,46 +1341,45 @@ def render_results(results, selected_cycle, lang):
             <div class="metric-label">{T('mape', lang)}</div>
         </div>""", unsafe_allow_html=True)
 
+    # --- Prediction trend ---
     st.markdown(f'<div class="section-header">{T("prediction_trend", lang)}</div>',
                 unsafe_allow_html=True)
     fig_trend = plot_prediction_trend(acts, preds, selected_cycle)
     st.pyplot(fig_trend); plt.close(fig_trend)
 
-
+    # --- SHAP ---
     st.markdown(f'<div class="section-header">{T("shap_title", lang)}</div>',
                 unsafe_allow_html=True)
 
     shap_source = results.get('shap_source', 'computed')
 
-    if shap_source == 'computed':
-        col1, col2 = st.columns(2)
-        with col1:
-            fig1 = plot_feature_importance(names, importance)
-            st.pyplot(fig1); plt.close(fig1)
-        with col2:
-            idx = min(selected_cycle, shap_vals.shape[0] - 1) \
-                  if shap_vals.ndim == 2 and shap_vals.shape[0] > 0 else 0
-            cycle_shap = shap_vals[idx] if shap_vals.ndim == 2 else np.zeros(len(names))
-            base_val = float(np.mean(acts))
-            fig2 = plot_waterfall(names, cycle_shap, base_val,
-                                  f"(Cycle {selected_cycle + 1})")
-            st.pyplot(fig2); plt.close(fig2)
-
+    # 行1：重要性柱状图 + 蜂群图
+    col1, col2 = st.columns(2)
+    with col1:
+        fig1 = plot_feature_importance(names, importance)
+        st.pyplot(fig1); plt.close(fig1)
+    with col2:
         fig3 = plot_beeswarm(
             names, shap_vals,
             feat_scaled[:len(shap_vals)] if feat_scaled is not None else None)
         st.pyplot(fig3); plt.close(fig3)
+
+    # 行2：瀑布图
+    base_val = float(np.mean(acts))
+    if shap_source == 'computed':
+        # 实时计算模式 → 按选中的 cycle 展示瀑布图
+        idx = min(selected_cycle, shap_vals.shape[0] - 1) \
+              if shap_vals.ndim == 2 and shap_vals.shape[0] > 0 else 0
+        cycle_shap = shap_vals[idx] if shap_vals.ndim == 2 else np.zeros(len(names))
+        fig2 = plot_waterfall(names, cycle_shap, base_val,
+                              f"(Cycle {selected_cycle + 1})")
+        st.pyplot(fig2); plt.close(fig2)
     else:
-        # 预计算模式（Sim）：只显示 重要性 + 蜂群图，不显示瀑布图和依赖图
-        col1, col2 = st.columns(2)
-        with col1:
-            fig1 = plot_feature_importance(names, importance)
-            st.pyplot(fig1); plt.close(fig1)
-        with col2:
-            fig3 = plot_beeswarm(
-                names, shap_vals,
-                feat_scaled[:len(shap_vals)] if feat_scaled is not None else None)
-            st.pyplot(fig3); plt.close(fig3)
+        # 预计算模式 → 用所有样本的平均 SHAP 值展示整体贡献分解
+        mean_shap = shap_vals.mean(axis=0) if shap_vals.ndim == 2 else np.zeros(len(names))
+        fig2 = plot_waterfall(names, mean_shap, base_val,
+                              "(Average across all samples)")
+        st.pyplot(fig2); plt.close(fig2)
 
     # --- Download ---
     st.markdown("<br>", unsafe_allow_html=True)
@@ -1332,6 +1393,10 @@ def render_results(results, selected_cycle, lang):
     st.download_button(label=T('download_results', lang), data=csv,
                        file_name="soh_predictions.csv", mime="text/csv")
 
+
+# ======================================================================
+#  page_demo  ─ 传入 shap_data_dir 和 battery_type
+# ======================================================================
 
 def page_demo(lang):
     st.markdown(f"""
@@ -1446,6 +1511,10 @@ def page_demo(lang):
 
     render_results(results, selected_cycle, lang)
 
+
+# ======================================================================
+#  page_train  ─ 训练新模型，无预计算缓存
+# ======================================================================
 
 def page_train(lang):
     st.markdown(f'<div class="section-header">{T("train_title", lang)}</div>',
@@ -1599,7 +1668,9 @@ def page_train(lang):
         render_results(results, selected, lang)
 
 
-
+# ======================================================================
+#  page_predict  ─ 用论文模型时尝试读缓存
+# ======================================================================
 
 def page_predict(lang):
     st.markdown(f'<div class="section-header">{T("predict_title", lang)}</div>',
@@ -1721,6 +1792,7 @@ def page_predict(lang):
                                 battery_type=detected_type,
                             )
                         else:
+                            # 非预计算数据 → 200 样本实时计算
                             importance, shap_vals, _, _, shap_source = calculate_shap_values(
                                 model, dataset, scaler_X, scaler_y, device,
                                 n_samples=200, bg_size=50, nsamples_kernel=200,
@@ -1796,6 +1868,7 @@ def page_about(lang):
     </div>""", unsafe_allow_html=True)
 
 
+# ================================ Main ================================
 
 def main():
     load_css()
