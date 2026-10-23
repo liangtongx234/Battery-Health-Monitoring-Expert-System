@@ -6,13 +6,13 @@ An interactive web-based tool for lithium-ion battery state-of-health (SOH) esti
 
 ## Overview
 
-This repository contains the implementation and demonstration tool described in:
+This repository provides the implementation and interactive demonstration accompanying the following article:
 
-> **State-of-health estimation of lithium-ion batteries using end-of-charge features with cross-domain validation**
-> 
-> Fuyuan Liang, Xing Zhou\*, Haiqing Yu, Tao Zhang, Yajie Liu\*
-> 
-> National University of Defense Technology
+> Fuyuan Liang, Xing Zhou, Haiqing Yu, Tao Zhang, and Yajie Liu.
+> **State-of-health estimation of lithium-ion batteries using end-of-charge features with cross-domain validation.**
+> *Journal of Energy Storage*, 181, Part C (2026), 124183.
+
+**Paper:** [DOI](https://doi.org/10.1016/j.est.2026.124183) | [Publisher page](https://www.sciencedirect.com/science/article/abs/pii/S2352152X26038478)
 
 **Live Demo:** [https://battery-health-monitoring-expert-system-crzz64eajisrvnvajxoont.streamlit.app/](https://battery-health-monitoring-expert-system-crzz64eajisrvnvajxoont.streamlit.app/)
 
@@ -60,16 +60,22 @@ CSV files should contain the following columns:
 
 ## Citation
 
-If you find this work useful, please cite:
+If you use this work in your research, please cite:
+
 ```bibtex
 @article{liang2026soh,
-  title={State-of-health estimation of lithium-ion batteries using end-of-charge features with cross-domain validation},
-  author={Liang, Fuyuan and Zhou, Xing and Yu, Haiqing and Zhang, Tao and Liu, Yajie},
-  journal={Journal of Energy Storage},
-  note={Submitted},
-  year={2026}
+  author  = {Liang, Fuyuan and Zhou, Xing and Yu, Haiqing and Zhang, Tao and Liu, Yajie},
+  title   = {State-of-health estimation of lithium-ion batteries using end-of-charge features with cross-domain validation},
+  journal = {Journal of Energy Storage},
+  year    = {2026},
+  volume  = {181},
+  pages   = {124183},
+  note    = {Part C},
+  doi     = {10.1016/j.est.2026.124183},
+  url     = {https://www.sciencedirect.com/science/article/abs/pii/S2352152X26038478}
 }
 ```
+
 
 ## License
 
